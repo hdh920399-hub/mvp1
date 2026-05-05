@@ -1,39 +1,32 @@
-import streamlit as st
+import pandas as pd
+import requests
 
-from data.binance import get_klines
-from engine.voting import vote
-from engine.regime import market_state
-from risk.position import position
-from ui.chart import render
+def get_klines(symbol, interval, limit=500):
+    """从币安获取K线数据"""
+    url = "https://api.binance.com/api/v3/klines"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        
+        df = pd.DataFrame(data, columns=[
+            "time", "open", "high", "low", "close", "volume",
+            "close_time", "quote_asset_volume", "number_of_trades",
+            "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
+        ])
+        
+        df["time"] = pd.to_datetime(df["time"], unit="ms")
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        
+        return df[["time", "open", "high", "low", "close", "volume"]]
+    except Exception as e:
+        return None
 
-st.set_page_config(layout="wide")
-
-st.title("🚀 AlphaPilot Lite Pro")
-
-symbol = st.selectbox("币种", ["BTCUSDT","ETHUSDT","SOLUSDT"])
-balance = st.number_input("资金(USDT)", value=100)
-
-df = get_klines(symbol)
-
-signal = vote(df)
-state = market_state(df)
-
-pos, lev = position(balance, 0.7)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.subheader("🧠 信号")
-    st.success(signal)
-
-with col2:
-    st.subheader("📊 市场状态")
-    st.info(state)
-
-with col3:
-    st.subheader("💰 仓位")
-    st.write({"pos": pos, "lev": lev})
-
-st.subheader("📈 K线图（TradingView风格）")
-
-st.plotly_chart(render(df, signal), use_container_width=True)
+def get_symbols():
+    """获取热门交易对列表"""
+    return ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
