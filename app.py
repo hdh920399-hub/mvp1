@@ -83,8 +83,20 @@ col_left, col_right = st.columns([2,1])
 
 with col_left:
     st.subheader("📈 专业K线分析")
-    symbols = get_hot_symbols_cached(100)
-    selected = st.selectbox("选择币种", symbols, index=0)
+    # 新代码：从排行榜获取币种（按 AI 评分排序）
+# 先获取排行榜数据（已按评分排序）
+ranking_df, _ = load_ranking_cached(max_price, 50)  # 取前50个评分最高的低价币
+if not ranking_df.empty:
+    # 构造币种完整名称（加上 USDT 后缀）
+    ranked_symbols = [row["币种"] + "USDT" for _, row in ranking_df.iterrows()]
+    # 可选：显示评分信息在下拉框中
+    symbol_options = [f"{row['币种']} (评分:{row['评分']})" for _, row in ranking_df.iterrows()]
+    selected_label = st.selectbox("选择AI推荐币种（按评分排序）", symbol_options, index=0)
+    selected = selected_label.split(" (")[0] + "USDT"
+else:
+    # 如果没有低价币数据，回退到成交量排序的列表
+    all_symbols = get_hot_symbols_cached(100)
+    selected = st.selectbox("选择币种（成交量排序）", all_symbols, index=0)
     interval = st.selectbox("K线周期", ["1h","4h","1d"], index=1)
     df = get_klines_cached(selected, interval, limit=150)
     if df is not None and len(df) > 0:
