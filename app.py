@@ -1,105 +1,169 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 
-# 导入模块
-from data.binance import get_klines, get_symbols
-from engine.regime import market_state
-from engine.strategies import calculate_signals
-from ui.chart import create_candlestick_chart
-from risk.position import suggest_position
-from scanner.multi import scan_market
+# 导入所有模块
+from data.binance import get_klines, get_all_hot_symbols
+from engine.ai_signals import calculate_directional_signal
+from engine.strategy_engine import StrategyEngine
+from engine.param_optimizer import GeneticOptimizer
+from engine.param_optimizer_bayesian import BayesianOptimizer
+from engine.adaptive_learner import AdaptiveLearner
+from engine.regime_detector import RegimeDetector
+from risk.portfolio import SimulatedTrader
+from analysis.daily_summary import DailySummarizer
+from analysis.backtest_exporter import BacktestExporter
+from scanner.multi import scan_cheap_coins_with_signal
+from ui.chart import create_pro_chart
 
-# 页面配置
-st.set_page_config(page_title="AlphaPilot Lite Pro", layout="wide", page_icon="🚀")
+# 缓存装饰器
+@st.cache_data(ttl=300, show_spinner=False)
+def get_klines_cached(symbol, interval, limit=150):
+    return get_klines(symbol, interval, limit)
 
-# 标题
-st.title("🚀 AlphaPilot Lite Pro - AI 交易分析终端")
-st.caption("实时加密货币技术分析 | 数据来自币安公开API")
+@st.cache_data(ttl=86400)
+def get_hot_symbols_cached(limit=100):
+    return get_all_hot_symbols(limit)
 
-# ========== 侧边栏配置 ==========
+@st.cache_data(ttl=120)
+def load_ranking_cached(max_price, limit):
+    return scan_cheap_coins_with_signal(max_price=max_price, limit=limit, offset=0)
+
+# 初始化 session state
+if "trader" not in st.session_state:
+    st.session_state.trader = SimulatedTrader(100)
+if "strategy_engine" not in st.session_state:
+    st.session_state.strategy_engine = StrategyEngine()
+if "adaptive_learner" not in st.session_state:
+    st.session_state.adaptive_learner = AdaptiveLearner()
+if "regime_detector" not in st.session_state:
+    st.session_state.regime_detector = RegimeDetector()
+if "ranking_limit" not in st.session_state:
+    st.session_state.ranking_limit = 20
+
+st.set_page_config(page_title="AlphaPilot AI", layout="wide", page_icon="🤖")
+st.title("🤖 AlphaPilot AI - 合约智能交易终端")
+st.caption("币安U本位 | 多空双向 | 低价币扫描 | 遗传/贝叶斯优化 | 自适应学习 | 自动止盈止损 | 回测导出")
+
+# 侧边栏
 with st.sidebar:
-    st.header("⚙️ 配置面板")
-    
-    symbol = st.selectbox("📊 交易对", get_symbols(), index=0)
-    interval = st.selectbox("⏱️ K线周期", ["15m", "1h", "4h", "1d"], index=2)
-    lookback = st.slider("📅 数据回看天数", 7, 90, 30)
-    
-    st.markdown("---")
-    capital = st.number_input("💰 本金 (USDT)", min_value=10, value=100, step=10)
-    risk_level = st.select_slider("⚠️ 风险偏好", options=["保守", "中", "激进"], value="中")
-    
-    st.markdown("---")
-    if st.button("🔄 刷新数据", use_container_width=True):
+    st.header("⚙️ 配置")
+    capital = st.number_input("💰 虚拟本金", 10, 1000, 100)
+    max_price = st.slider("💰 最高价(USDT)", 0.1, 2.0, 1.0)
+    if st.button("🔄 重置账户"):
+        st.session_state.trader = SimulatedTrader(capital)
         st.cache_data.clear()
         st.rerun()
+    if st.button("🗑️ 清空缓存"):
+        st.cache_data.clear()
+        st.rerun()
+    st.caption(f"⏱️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ========== 主区域 ==========
-# 计算时间范围
-end_time = datetime.now()
-start_time = end_time - timedelta(days=lookback)
+# 排行榜
+st.subheader("🏆 低价潜力币排行榜")
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("📋 显示20个"): st.session_state.ranking_limit = 20; st.rerun()
+with col2:
+    if st.button("➕ 显示50个"): st.session_state.ranking_limit = 50; st.rerun()
+with col3:
+    if st.button("📄 显示全部"): st.session_state.ranking_limit = 200; st.rerun()
 
-# 获取数据
-@st.cache_data(ttl=300)
-def load_data(sym, interval, lookback_days):
-    limit = int(lookback_days * 24 * 4)  # 按4小时估算
-    return get_klines(sym, interval, limit=min(limit, 1000))
-
-df = load_data(symbol, interval, lookback)
-
-# 判断数据是否有效
-data_valid = df is not None and len(df) >= 20
-
-# 三栏布局
-col_chart, col_signals = st.columns([2, 1])
-
-with col_chart:
-    st.subheader("📈 价格图表")
-    if data_valid:
-        fig = create_candlestick_chart(df, symbol)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # 市场状态
-        state = market_state(df)
-        state_color = {"BULL": "green", "BEAR": "red", "SIDEWAYS": "orange"}.get(state, "gray")
-        st.markdown(f"### 📊 市场状态：**:{state_color}[{state}]**")
-    else:
-        st.error(f"❌ 无法获取 {symbol} 数据，请检查网络或稍后重试")
-
-with col_signals:
-    st.subheader("🧠 AI信号面板")
-    if data_valid:
-        signals = calculate_signals(df)
-        for key, value in signals.items():
-            if "🟢" in value:
-                st.success(value)
-            elif "🔴" in value:
-                st.error(value)
-            else:
-                st.info(value)
-        
-        st.markdown("---")
-        st.subheader("💰 仓位建议")
-        position = suggest_position(state, risk_level, capital)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("仓位比例", position["仓位比例"])
-        with col2:
-            st.metric("杠杆", f"{position['杠杆倍数']}x")
-        with col3:
-            st.metric("风险", position["风险等级"])
-        st.caption(f"{position['仓位金额']} 建议入场")
-    else:
-        st.warning("等待数据加载...")
-
-# ========== 底部扫描区 ==========
-st.markdown("---")
-st.subheader("🔥 多币种快速扫描")
-
-with st.spinner("扫描中..."):
-    scan_df = scan_market(interval=interval)
-
-if scan_df is not None and not scan_df.empty:
-    st.dataframe(scan_df, use_container_width=True)
+df_rank, total = load_ranking_cached(max_price, st.session_state.ranking_limit)
+if not df_rank.empty:
+    st.dataframe(df_rank, use_container_width=True, height=400)
+    st.caption(f"共 {total} 个低价币")
 else:
-    st.info("暂无扫描数据")
+    st.warning("暂无数据")
+
+st.markdown("---")
+
+# 主分析区
+col_left, col_right = st.columns([2,1])
+
+with col_left:
+    st.subheader("📈 专业K线分析")
+    symbols = get_hot_symbols_cached(100)
+    selected = st.selectbox("选择币种", symbols, index=0)
+    interval = st.selectbox("K线周期", ["1h","4h","1d"], index=1)
+    df = get_klines_cached(selected, interval, limit=150)
+    if df is not None and len(df) > 0:
+        fig = create_pro_chart(df, selected)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.error("数据加载失败")
+
+with col_right:
+    st.subheader("🎯 AI实时信号")
+    if df is not None and len(df) >= 50:
+        signal = calculate_directional_signal(df)
+        st.info(signal["summary"])
+        st.metric("做多评分", signal["long_score"])
+        st.metric("做空评分", signal["short_score"])
+        st.caption(f"RSI: {signal['rsi']} | 量比: {signal['vol_ratio']}")
+    st.markdown("---")
+    st.subheader("💰 模拟交易")
+    usdt = st.number_input("金额(USDT)", 5, 500, 20)
+    lev = st.select_slider("杠杆", [1,2,3,5], value=1)
+    col_b, col_s = st.columns(2)
+    with col_b:
+        if st.button("🟢 做多"):
+            if df is not None:
+                price = df["close"].iloc[-1]
+                ok, msg = st.session_state.trader.buy(selected, price, usdt, lev)
+                st.toast(msg)
+    with col_s:
+        if st.button("🔴 做空"):
+            if df is not None:
+                price = df["close"].iloc[-1]
+                ok, msg = st.session_state.trader.short(selected, price, usdt, lev)
+                st.toast(msg)
+
+# 账户表现
+st.markdown("---")
+perf = st.session_state.trader.get_performance()
+col_a, col_b, col_c, col_d = st.columns(4)
+col_a.metric("当前本金", f"{perf['当前本金']} U")
+col_b.metric("总盈亏", f"{perf['总盈亏']:+.2f} U")
+col_c.metric("收益率", f"{perf['收益率']}%")
+col_d.metric("交易次数", perf["交易次数"])
+if st.button("📥 导出回测报告"):
+    trades_csv = BacktestExporter.export_trades_to_csv(st.session_state.trader.trades)
+    perf_csv = BacktestExporter.export_performance_to_csv(perf)
+    if trades_csv:
+        st.download_button("下载交易记录", trades_csv, "trades.csv", "text/csv")
+    st.download_button("下载账户表现", perf_csv, "performance.csv", "text/csv")
+
+# 深度优化引擎（简化版）
+st.markdown("---")
+st.subheader("🧬 深度优化引擎")
+tab1, tab2, tab3, tab4 = st.tabs(["市场状态", "策略参数", "优化器", "自适应学习"])
+with tab1:
+    regime = st.session_state.regime_detector.detect_regime(df)
+    st.write(regime)
+with tab2:
+    st.json(st.session_state.strategy_engine.params)
+with tab3:
+    opt_type = st.radio("优化器", ["遗传算法", "贝叶斯优化"])
+    if st.button("启动优化"):
+        with st.spinner("优化中..."):
+            if opt_type == "遗传算法":
+                opt = GeneticOptimizer()
+            else:
+                opt = BayesianOptimizer()
+            res = opt.optimize(df)
+            st.success(res["message"])
+            st.session_state.optimizer_result = res
+    if 'optimizer_result' in st.session_state:
+        st.json(st.session_state.optimizer_result.get("best_params", {}))
+with tab4:
+    st.write(st.session_state.adaptive_learner.get_learning_summary())
+    if st.button("触发自适应调整"):
+        new_params, reason = st.session_state.adaptive_learner.adapt_params(st.session_state.strategy_engine.params)
+        st.info(reason)
+
+# 每日总结
+with st.expander("📋 每日总结报告"):
+    if st.button("生成报告"):
+        summarizer = DailySummarizer(st.session_state.trader)
+        st.markdown(summarizer.generate())

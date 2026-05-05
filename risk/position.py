@@ -1,26 +1,44 @@
-def suggest_position(market_state, risk_level="中", capital=100):
-    """计算仓位建议"""
-    state_map = {
-        "BULL": {"激进": 0.8, "中": 0.6, "保守": 0.4},
-        "SIDEWAYS": {"激进": 0.5, "中": 0.3, "保守": 0.2},
-        "BEAR": {"激进": 0.2, "中": 0.1, "保守": 0.05}
-    }
+from datetime import datetime
+
+class SimulatedTrader:
+    def __init__(self, initial_balance=100):
+        self.balance = initial_balance
+        self.holdings = {}
+        self.trades = []
+        self.initial_balance = initial_balance
+        self.stop_loss_pct = 0.02
+        self.take_profit_pct = 0.05
     
-    leverage_map = {
-        "BULL": {"激进": 5, "中": 3, "保守": 1},
-        "SIDEWAYS": {"激进": 2, "中": 1, "保守": 1},
-        "BEAR": {"激进": 1, "中": 1, "保守": 1}
-    }
+    def buy(self, symbol, price, usdt_amount, leverage=1):
+        margin = usdt_amount / leverage
+        if margin > self.balance:
+            return False, "余额不足"
+        quantity = usdt_amount / price
+        self.holdings[symbol] = {"quantity": quantity, "avg_price": price, "side": "LONG"}
+        self.balance -= margin
+        self.trades.append({"action": "BUY", "symbol": symbol, "price": price, "quantity": quantity, "pnl": 0})
+        return True, f"买入 {quantity:.4f}"
     
-    position_pct = state_map.get(market_state, {"激进": 0.3, "中": 0.2, "保守": 0.1}).get(risk_level, 0.3)
-    leverage = leverage_map.get(market_state, {"激进": 1, "中": 1, "保守": 1}).get(risk_level, 1)
+    def short(self, symbol, price, usdt_amount, leverage=1):
+        margin = usdt_amount / leverage
+        if margin > self.balance:
+            return False, "余额不足"
+        quantity = usdt_amount / price
+        self.holdings[symbol] = {"quantity": quantity, "avg_price": price, "side": "SHORT"}
+        self.balance -= margin
+        self.trades.append({"action": "SHORT", "symbol": symbol, "price": price, "quantity": quantity, "pnl": 0})
+        return True, f"做空 {quantity:.4f}"
     
-    position_usdt = capital * position_pct
+    def update_positions(self, current_prices):
+        closed = []
+        # 简化版，不自动止盈止损，仅演示
+        return closed
     
-    return {
-        "仓位比例": f"{position_pct * 100:.0f}%",
-        "仓位金额": f"{position_usdt:.0f} USDT",
-        "杠杆倍数": leverage,
-        "风险等级": risk_level,
-        "市场状态": market_state
-    }
+    def get_performance(self):
+        return {
+            "当前本金": self.balance,
+            "总盈亏": self.balance - self.initial_balance,
+            "收益率": (self.balance - self.initial_balance)/self.initial_balance*100,
+            "交易次数": len(self.trades),
+            "最大回撤": 0
+        }

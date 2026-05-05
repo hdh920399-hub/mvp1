@@ -1,27 +1,15 @@
-# 🚀 AlphaPilot Lite Pro
+# 🚀 AlphaPilot AI - 合约智能交易终端
 
-AI TradingView 风格加密交易分析终端
-
-## 功能
-
-* 📊 K线图（Plotly）
-* 🧠 AI信号（多策略）
-* 📈 市场状态分析
-* 🔥 多币扫描
-* 💰 仓位建议
-
-## 技术栈
-
-* Streamlit
-* Plotly
-* Binance Public API
+币安U本位永续合约 | AI多空双向评分 | 低价币扫描 | 遗传/贝叶斯优化 | 自适应学习 | 自动止盈止损 | 回测导出
 
 ## 部署
 
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/your-template)
+
+或手动：
+
 ```bash
+git clone https://github.com/你的用户名/AlphaPilot-Lite-Pro.git
+cd AlphaPilot-Lite-Pro
+pip install -r requirements.txt
 streamlit run app.py
-```
-
-## 说明
-
-本项目仅用于市场分析，不构成投资建议。
