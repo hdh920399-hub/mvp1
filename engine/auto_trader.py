@@ -14,75 +14,66 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=5
         st.toast("❌ 未扫描到任何低价币")
         return result
 
-    # 显示扫描到的币种及评分（调试用）
-    debug_info = []
+    candidates = []
+    # 注意：DataFrame 列名为 "币种"（简体）
     for _, row in ranking_df.iterrows():
-        symbol = row["币種"] + "USDT"
+        symbol = row["币种"] + "USDT"
         df = get_klines(symbol, "1h", limit=50)
         if df is not None and len(df) >= 30:
             sig = calculate_directional_signal(df)
-            long_score = sig["long_score"]
-            short_score = sig["short_score"]
-            debug_info.append(f"{symbol} 多:{long_score} 空:{short_score}")
-        else:
-            debug_info.append(f"{symbol} 数据不足")
-    st.toast("🔍 扫描结果: " + " | ".join(debug_info[:5]))  # 只显示前5个
-
-    # 按做多分排序
-    signals = []
-    for _, row in ranking_df.iterrows():
-        symbol = row["币種"] + "USDT"
-        df = get_klines(symbol, "1h", limit=50)
-        if df is not None and len(df) >= 30:
-            sig = calculate_directional_signal(df)
-            signals.append({
+            candidates.append({
                 "symbol": symbol,
                 "price": row["价格"],
+                "net_score": sig["net_score"],
                 "long_score": sig["long_score"],
-                "short_score": sig["short_score"],
-                "rsi": sig["rsi"]
+                "short_score": sig["short_score"]
             })
         else:
-            signals.append({
+            candidates.append({
                 "symbol": symbol,
                 "price": row["价格"],
+                "net_score": 0,
                 "long_score": 0,
-                "short_score": 0,
-                "rsi": 50
+                "short_score": 0
             })
 
-    signals.sort(key=lambda x: x["long_score"], reverse=True)
+    # 显示前3个币的净得分
+    summary = " | ".join([f"{c['symbol']}:净{c['net_score']}" for c in candidates[:3]])
+    st.toast(f"🔍 扫描结果: {summary}")
 
-    for sig in signals:
-        if sig["symbol"] in trader.holdings:
+    # 按净得分降序
+    candidates.sort(key=lambda x: x["net_score"], reverse=True)
+
+    for c in candidates:
+        if c["symbol"] in trader.holdings:
             continue
-        if sig["long_score"] >= min_score:
+        if c["net_score"] >= min_score:
             capital = trader.balance
             usdt_amount = max(5, capital * risk_pct)
-            success, msg = trader.buy(sig["symbol"], sig["price"], usdt_amount, leverage=1)
+            success, msg = trader.buy(c["symbol"], c["price"], usdt_amount, leverage=1)
             if success:
                 result["trades"].append({
                     "action": "BUY",
-                    "symbol": sig["symbol"],
-                    "price": sig["price"],
+                    "symbol": c["symbol"],
+                    "price": c["price"],
                     "amount": usdt_amount
                 })
-                st.toast(f"✅ 自动开多 {sig['symbol']} @ {sig['price']:.6f}，金额 {usdt_amount:.2f} USDT")
+                st.toast(f"✅ 自动开多 {c['symbol']} @ {c['price']:.6f} (净得分:{c['net_score']})")
                 break
-        elif sig["short_score"] >= min_score:
+        elif c["net_score"] <= -min_score:
             capital = trader.balance
             usdt_amount = max(5, capital * risk_pct)
-            success, msg = trader.short(sig["symbol"], sig["price"], usdt_amount, leverage=1)
+            success, msg = trader.short(c["symbol"], c["price"], usdt_amount, leverage=1)
             if success:
                 result["trades"].append({
                     "action": "SHORT",
-                    "symbol": sig["symbol"],
-                    "price": sig["price"],
+                    "symbol": c["symbol"],
+                    "price": c["price"],
                     "amount": usdt_amount
                 })
-                st.toast(f"✅ 自动开空 {sig['symbol']} @ {sig['price']:.6f}，金额 {usdt_amount:.2f} USDT")
+                st.toast(f"✅ 自动开空 {c['symbol']} @ {c['price']:.6f} (净得分:{c['net_score']})")
                 break
 
     if not result["trades"]:
-        st.toast("🤖 未发现符合开仓条件的币种（评分均低于阈值）")
+        st.toast("🤖 未发现满足开仓条件的币种（净得分绝对值低于阈值）")
     return result
