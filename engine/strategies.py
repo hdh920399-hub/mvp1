@@ -1,5 +1,8 @@
 def ma_strategy(df):
 
+    if len(df) < 50:
+        return "HOLD"
+
     ma20 = df["close"].rolling(20).mean().iloc[-1]
     ma50 = df["close"].rolling(50).mean().iloc[-1]
 
@@ -12,6 +15,9 @@ def ma_strategy(df):
 
 def momentum(df):
 
+    if len(df) < 2:
+        return "HOLD"
+
     r = df["close"].pct_change().iloc[-1]
 
     if r > 0.02:
@@ -22,6 +28,9 @@ def momentum(df):
 
 
 def breakout(df):
+
+    if len(df) < 21:
+        return "HOLD"
 
     if df["close"].iloc[-1] > df["high"].rolling(20).max().iloc[-2]:
         return "BUY"
