@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime
 import pandas as pd
+import time
 
 # 导入所有模块
 from data.binance import get_klines, get_all_hot_symbols
@@ -19,19 +20,24 @@ from ui.chart import create_pro_chart
 
 st.set_page_config(page_title="AlphaPilot AI", layout="wide", page_icon="🤖")
 
-# ========== 全局缓存 ==========
+# ========== 全局缓存（优化TTL） ==========
 @st.cache_data(ttl=15, show_spinner=False)
 def get_klines_cached(symbol, interval, limit=150):
     return get_klines(symbol, interval, limit)
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400, show_spinner=False)
 def get_hot_symbols_cached(limit=100):
     return get_all_hot_symbols(limit)
 
+# 排行榜缓存：30秒自动更新（若启用实时刷新则更短）
 @st.cache_data(ttl=30, show_spinner=False)
 def load_ranking_cached(max_price, limit):
-    df, total = scan_cheap_coins_with_signal(max_price=max_price, limit=limit, offset=0)
-    return df, total
+    try:
+        df, total = scan_cheap_coins_with_signal(max_price=max_price, limit=limit, offset=0)
+        return df, total
+    except Exception as e:
+        st.error(f"获取排行榜失败: {e}")
+        return pd.DataFrame(), 0
 
 # ========== 初始化 Session State ==========
 if "trader" not in st.session_state:
@@ -48,9 +54,11 @@ if "ranking_limit" not in st.session_state:
     st.session_state.ranking_limit = 20
 if "auto_trade_last_time" not in st.session_state:
     st.session_state.auto_trade_last_time = datetime.now()
+if "auto_refresh" not in st.session_state:
+    st.session_state.auto_refresh = False
 
 st.title("🤖 AlphaPilot AI - 合约智能交易终端")
-st.caption("币安U本位 | 多空双向 | 低价币扫描 | 遗传/贝叶斯优化 | 自适应学习 | 自动止盈止损 | AI自动交易")
+st.caption("币安U本位 | 多空双向 | 低价币扫描 | 遗传/贝叶斯优化 | 自适应学习 | 自动止盈止损 | AI自动交易 | 实时刷新")
 
 # ========== 侧边栏配置 ==========
 with st.sidebar:
@@ -67,7 +75,20 @@ with st.sidebar:
         if st.button("🗑️ 清空缓存"):
             st.cache_data.clear()
             st.rerun()
-    
+
+    st.markdown("---")
+    st.subheader("🔄 数据刷新")
+    auto_refresh = st.checkbox("🌊 启用实时刷新 (每30秒)", value=st.session_state.auto_refresh)
+    if auto_refresh != st.session_state.auto_refresh:
+        st.session_state.auto_refresh = auto_refresh
+        if auto_refresh:
+            st.toast("实时刷新已启用，数据将每30秒更新一次")
+        else:
+            st.toast("实时刷新已停用")
+    if st.button("🔄 手动刷新数据", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
     st.markdown("---")
     st.subheader("🤖 AI 自动交易")
     auto_enabled = st.checkbox("启用自动交易", value=False)
@@ -79,7 +100,7 @@ with st.sidebar:
         
         now = datetime.now()
         diff = (now - st.session_state.auto_trade_last_time).total_seconds()
-        if diff >= auto_interval:
+        if diff >= auto_interval and auto_enabled:
             with st.spinner("AI 正在自动交易..."):
                 result = auto_trade(
                     st.session_state.trader,
@@ -94,7 +115,8 @@ with st.sidebar:
                         st.toast(f"🤖 {trade['action']} {trade['symbol']} @ {trade['price']:.6f}")
             st.rerun()
         else:
-            st.caption(f"下次扫描: {int(auto_interval - diff)} 秒后")
+            remaining = int(auto_interval - diff) if diff < auto_interval else 0
+            st.caption(f"下次扫描: {remaining} 秒后")
     else:
         st.caption("自动交易未启用")
     
@@ -117,7 +139,7 @@ with col_btn3:
         st.session_state.ranking_limit = 200
         st.rerun()
 with col_refresh:
-    if st.button("🔄 强制刷新排行"):
+    if st.button("🔄 强制刷新排行", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -152,10 +174,9 @@ else:
     selected_symbol = st.selectbox("选择币种（成交量排序）", all_symbols, index=0)
 interval = st.selectbox("K线周期", ["15m","1h","4h","1d"], index=2)
 
-# --- 在这里获取K线数据，定义 df 变量 ---
-df = get_klines_cached(selected_symbol, interval, limit=150)
+with st.spinner(f"📈 正在加载 {selected_symbol} K线数据，请稍候..."):
+    df = get_klines_cached(selected_symbol, interval, limit=150)
 
-# --- 以下所有模块都放在这里，确保它们在 df 定义之后运行 ---
 col_left, col_right = st.columns([2, 1])
 with col_left:
     if df is not None and len(df) >= 20:
@@ -163,6 +184,7 @@ with col_left:
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("K线数据加载中...")
+
 with col_right:
     st.subheader("🎯 AI实时信号")
     if df is not None and len(df) >= 50:
@@ -171,6 +193,8 @@ with col_right:
         st.metric("做多评分", signal["long_score"])
         st.metric("做空评分", signal["short_score"])
         st.caption(f"RSI: {signal['rsi']} | 量比: {signal['vol_ratio']}")
+    else:
+        st.info("等待数据...")
     st.markdown("---")
     st.subheader("💰 模拟交易")
     usdt = st.number_input("金额(USDT)", 5, 500, 20, step=5)
@@ -204,51 +228,55 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
-# ========== 深度优化引擎 ==========
+# ========== 深度优化引擎（折叠） ==========
 st.markdown("---")
-st.subheader("🧬 深度优化引擎")
-tab1, tab2, tab3, tab4 = st.tabs(["📊 市场状态", "⚙️ 策略参数", "🧬 优化器", "🧠 自适应学习"])
-
-with tab1:
-    if df is not None and len(df) >= 100:
-        regime = st.session_state.regime_detector.detect_regime(df)
-        st.json(regime)
-    else:
-        st.warning("数据不足，无法分析市场状态")
-with tab2:
-    st.json(st.session_state.strategy_engine.params)
-    if st.button("重置为默认参数"):
-        st.session_state.strategy_engine = StrategyEngine()
-        st.rerun()
-with tab3:
-    opt_type = st.radio("优化器", ["遗传算法", "贝叶斯优化"])
-    if st.button("启动优化"):
-        if df is not None and len(df) >= 500:
-            with st.spinner("优化中..."):
-                if opt_type == "遗传算法":
-                    opt = GeneticOptimizer()
-                else:
-                    opt = BayesianOptimizer()
-                res = opt.optimize(df)
-                st.session_state.optimizer_result = res
-                st.success(res.get("message", "优化完成"))
+with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 市场状态", "⚙️ 策略参数", "🧬 优化器", "🧠 自适应学习"])
+    
+    with tab1:
+        if df is not None and len(df) >= 100:
+            regime = st.session_state.regime_detector.detect_regime(df)
+            st.json(regime)
         else:
-            st.error("数据不足，需要至少500根K线")
-    if st.session_state.optimizer_result:
-        st.json(st.session_state.optimizer_result.get("best_params", {}))
-with tab4:
-    st.markdown(st.session_state.adaptive_learner.get_learning_summary())
-    if st.button("触发自适应调整"):
-        new_params, reason = st.session_state.adaptive_learner.adapt_params(st.session_state.strategy_engine.params)
-        if new_params != st.session_state.strategy_engine.params:
-            st.session_state.strategy_engine = StrategyEngine(new_params)
-            st.success(f"已调整: {reason}")
-        else:
-            st.info(reason)
+            st.warning("数据不足，无法分析市场状态")
+    
+    with tab2:
+        st.json(st.session_state.strategy_engine.params)
+        if st.button("重置为默认参数"):
+            st.session_state.strategy_engine = StrategyEngine()
+            st.rerun()
+    
+    with tab3:
+        opt_type = st.radio("优化器", ["遗传算法", "贝叶斯优化"])
+        if st.button("🚀 启动优化", use_container_width=True):
+            if df is not None and len(df) >= 500:
+                with st.spinner("优化运行中，请稍候 (可能需要30-60秒)..."):
+                    if opt_type == "遗传算法":
+                        opt = GeneticOptimizer()
+                    else:
+                        opt = BayesianOptimizer()
+                    res = opt.optimize(df)
+                    st.session_state.optimizer_result = res
+                    st.success(res.get("message", "优化完成"))
+            else:
+                st.error("数据不足，需要至少500根K线")
+        if st.session_state.optimizer_result:
+            st.subheader("上次优化结果")
+            st.json(st.session_state.optimizer_result.get("best_params", {}))
+    
+    with tab4:
+        st.markdown(st.session_state.adaptive_learner.get_learning_summary())
+        if st.button("🔄 触发自适应调整"):
+            new_params, reason = st.session_state.adaptive_learner.adapt_params(st.session_state.strategy_engine.params)
+            if new_params != st.session_state.strategy_engine.params:
+                st.session_state.strategy_engine = StrategyEngine(new_params)
+                st.success(f"参数已调整: {reason}")
+            else:
+                st.info(reason)
 
-# ========== 每日总结 ==========
+# ========== 每日总结（折叠） ==========
 with st.expander("📋 每日总结报告 & 交易记录", expanded=False):
-    if st.button("生成报告"):
+    if st.button("📄 生成今日报告"):
         summarizer = DailySummarizer(st.session_state.trader)
         st.markdown(summarizer.generate())
     if st.session_state.trader.trades:
@@ -256,9 +284,12 @@ with st.expander("📋 每日总结报告 & 交易记录", expanded=False):
         if "timestamp" in df_trades.columns:
             df_trades["timestamp"] = df_trades["timestamp"].dt.strftime("%H:%M:%S")
         st.dataframe(df_trades, use_container_width=True)
+    else:
+        st.info("暂无交易记录")
 
+# ========== 实时风控事件（手动刷新） ==========
 with st.expander("🚨 实时风控事件", expanded=False):
-    if st.button("刷新持仓检查"):
+    if st.button("🔄 刷新持仓检查"):
         if df is not None:
             closed = st.session_state.trader.update_positions({selected_symbol: df["close"].iloc[-1]})
             if closed:
@@ -266,3 +297,9 @@ with st.expander("🚨 实时风控事件", expanded=False):
                     st.write(f"📢 {c['symbol']} {c['reason']} 平仓, 盈亏 {c['pnl']:+.2f} U")
             else:
                 st.info("无平仓事件")
+
+# ========== 自动刷新逻辑 ==========
+if st.session_state.get("auto_refresh", False):
+    time.sleep(30)
+    st.cache_data.clear()
+    st.rerun()
