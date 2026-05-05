@@ -21,8 +21,6 @@ def get_klines(symbol, interval, limit=500):
         return df[["time", "open", "high", "low", "close", "volume"]]
     except Exception as e:
         return None
-
-<<<<<<< HEAD
 def get_all_hot_symbols(limit=100):
     """获取热门交易对（按24h成交量排序）"""
     url = f"{FUTURES_BASE_URL}/fapi/v1/ticker/24hr"
