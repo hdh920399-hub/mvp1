@@ -1,0 +1,16 @@
+[phases.setup]
+nixPkgs = ["python39", "gcc", "gfortran", "blas", "lapack"]
+
+[phases.install]
+cmds = [
+  "python -m pip install --upgrade pip",
+  "pip install -r requirements.txt"
+]
+
+[phases.build]
+cmds = [
+  "echo 'Build completed'"
+]
+
+[start]
+cmd = "streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"

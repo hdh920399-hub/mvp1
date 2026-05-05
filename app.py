@@ -2,6 +2,42 @@ import streamlit as st
 from datetime import datetime
 import pandas as pd
 
+# 检查依赖
+def check_dependencies():
+    missing = []
+    try:
+        import streamlit
+    except ImportError:
+        missing.append("streamlit")
+    try:
+        import pandas
+    except ImportError:
+        missing.append("pandas")
+    try:
+        import numpy
+    except ImportError:
+        missing.append("numpy")
+    try:
+        import plotly
+    except ImportError:
+        missing.append("plotly")
+    try:
+        import requests
+    except ImportError:
+        missing.append("requests")
+    try:
+        import skopt
+    except ImportError:
+        missing.append("scikit-optimize")
+    
+    if missing:
+        st.error(f"缺少必要的依赖包: {', '.join(missing)}")
+        st.info("请运行以下命令安装依赖:")
+        st.code("pip install -r requirements.txt")
+        st.stop()
+
+check_dependencies()
+
 # 导入所有模块
 from data.binance import get_klines, get_all_hot_symbols
 from engine.ai_signals import calculate_directional_signal
@@ -57,6 +93,43 @@ with st.sidebar:
     if st.button("🗑️ 清空缓存"):
         st.cache_data.clear()
         st.rerun()
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🤖 AI 自动交易")
+    auto_trade_enabled = st.sidebar.checkbox("启用自动交易", value=False)
+
+    if auto_trade_enabled:
+        auto_interval = st.sidebar.selectbox("扫描间隔(秒)", [30, 60, 120], index=1)
+        auto_max_positions = st.sidebar.number_input("最大同时持仓数", 1, 5, 3)
+        auto_risk_per_trade = st.sidebar.slider("单笔风险(占总资金%)", 1, 20, 10) / 100
+        auto_min_score = st.sidebar.slider("开仓最低评分", 40, 80, 55)
+
+        if "last_auto_trade_time" not in st.session_state:
+            st.session_state.last_auto_trade_time = datetime.now()
+
+        now = datetime.now()
+        time_diff = (now - st.session_state.last_auto_trade_time).total_seconds()
+
+        if time_diff >= auto_interval:
+            with st.spinner("AI 正在扫描市场并自动交易..."):
+                from engine.auto_trader import auto_trade
+                trade_result = auto_trade(
+                    st.session_state.trader,
+                    max_price=max_price,
+                    max_positions=auto_max_positions,
+                    risk_pct=auto_risk_per_trade,
+                    min_score=auto_min_score
+                )
+                st.session_state.last_auto_trade_time = now
+                if trade_result.get("trades"):
+                    for trade in trade_result["trades"]:
+                        st.toast(f"🤖 AI 自动{trade['action']} {trade['symbol']} {trade['price']:.6f}")
+                else:
+                    st.caption("当前无符合条件的自动交易信号")
+            st.rerun()
+        else:
+            st.sidebar.caption(f"下次扫描: {auto_interval - int(time_diff)} 秒后")
+
     st.caption(f"⏱️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # 排行榜
