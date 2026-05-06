@@ -22,7 +22,6 @@ class AdaptiveLearner:
         return {"win_rate": win_rate, "avg_pnl": avg_pnl, "sharpe": sharpe}
 
     def adapt_params(self, current_params):
-        """current_params 应包含：min_score, risk_pct, stop_loss_pct, take_profit_pct（均为百分比数值）"""
         perf = self.get_recent_performance(lookback=10)
         new_params = current_params.copy()
         reason = ""
