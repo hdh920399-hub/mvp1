@@ -7,9 +7,7 @@ FUTURES_BASE_URL = "https://fapi.binance.com"
 def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
     url = f"{FUTURES_BASE_URL}/fapi/v1/ticker/24hr"
     try:
-        resp = requests.get(url, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
+        resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         data = resp.json()
         cheap = []
         for item in data:
@@ -38,6 +36,9 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
 
             if df is not None and len(df) >= 30:
                 close = df["close"]
+                high = df["high"]
+                low = df["low"]
+                # 计算 RSI
                 delta = close.diff()
                 gain = delta.where(delta > 0, 0)
                 loss = -delta.where(delta < 0, 0)
@@ -47,11 +48,10 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                 rsi = round(rsi_val, 1)
 
-                # 获取最新价格与均线位置
-                ma20 = close.rolling(20).mean().iloc[-1]
-                ma50 = close.rolling(50).mean().iloc[-1] if len(df) >= 50 else ma20
+                # 计算 ATR (14周期平均真实波幅)
+                tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+                atr = tr.rolling(14).mean().iloc[-1]
                 price_now = coin["price"]
-                
                 # 基础评分与信号
                 if rsi < 30:
                     score = 80
@@ -74,7 +74,38 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                     signal = "⚪中性"
                     base = f"RSI={rsi}（中性区间）。"
 
-                # 均线位置补充
+                # 交易建议（根据信号方向生成）
+                trade_advice = ""
+                if score >= 70:   # 强烈做多
+                    direction = "做多"
+                    entry = price_now
+                    stop_loss = entry - 2 * atr
+                    take_profit = entry + 3 * atr
+                    risk_pct = (entry - stop_loss) / entry * 100
+                    if risk_pct > 0:
+                        position_pct = min(0.2, 0.02 / (risk_pct / 100))
+                    else:
+                        position_pct = 0.1
+                    leverage = max(1, min(5, int(5 / (atr/price_now * 100))))
+                    trade_advice = f" 【交易建议】{direction} 入场 {entry:.4f}，止损 {stop_loss:.4f}，止盈 {take_profit:.4f}，仓位 {position_pct*100:.1f}%，杠杆 {leverage}x。"
+                elif score <= 20: # 强烈做空
+                    direction = "做空"
+                    entry = price_now
+                    stop_loss = entry + 2 * atr
+                    take_profit = entry - 3 * atr
+                    risk_pct = (stop_loss - entry) / entry * 100
+                    if risk_pct > 0:
+                        position_pct = min(0.2, 0.02 / (risk_pct / 100))
+                    else:
+                        position_pct = 0.1
+                    leverage = max(1, min(5, int(5 / (atr/price_now * 100))))
+                    trade_advice = f" 【交易建议】{direction} 入场 {entry:.4f}，止损 {stop_loss:.4f}，止盈 {take_profit:.4f}，仓位 {position_pct*100:.1f}%，杠杆 {leverage}x。"
+                else:
+                    trade_advice = " 【交易建议】信号中性，建议观望。"
+
+                # 均线及成交量描述
+                ma20 = close.rolling(20).mean().iloc[-1]
+                ma50 = close.rolling(50).mean().iloc[-1] if len(df) >= 50 else ma20
                 if price_now > ma20 and price_now > ma50:
                     ma_desc = "价格位于MA20和MA50上方，短期趋势偏多。"
                 elif price_now < ma20 and price_now < ma50:
@@ -82,7 +113,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 else:
                     ma_desc = "价格介于均线之间，趋势不明朗。"
 
-                # 成交量分析
                 vol_ratio = df["volume"].iloc[-1] / df["volume"].rolling(20).mean().iloc[-1] if df["volume"].rolling(20).mean().iloc[-1] != 0 else 1
                 if vol_ratio > 1.5:
                     vol_desc = f"成交量显著放大（{vol_ratio:.2f}倍），资金关注度高。"
@@ -91,7 +121,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 else:
                     vol_desc = "成交量正常或萎缩，动能不足。"
 
-                # 24h涨跌幅评语
                 chg = coin["change"]
                 if chg > 10:
                     chg_desc = "24h涨幅较大，注意追高风险。"
@@ -100,15 +129,11 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 else:
                     chg_desc = "24h波动温和。"
 
-                # 综合分析
-                analysis = f"{base} {ma_desc} {vol_desc} {chg_desc} 综合评分：{score}分。"
-                
-                # 对于超卖且成交量放大的币种，额外提示
+                analysis = f"{base} {ma_desc} {vol_desc} {chg_desc} 综合评分：{score}分。{trade_advice}"
                 if rsi < 30 and vol_ratio > 1.2:
                     analysis += " ⚡ 超卖+放量，短线反弹概率较高。"
                 if rsi > 70 and vol_ratio > 1.5:
                     analysis += " ⚠️ 超买+放量，注意回调风险。"
-
             else:
                 # 数据不足时基于24h涨跌简单评分
                 chg = coin["change"]
