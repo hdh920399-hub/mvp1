@@ -78,20 +78,19 @@ if "ranking_limit" not in st.session_state:
     st.session_state.ranking_limit = 20
 if "auto_trade_last_time" not in st.session_state:
     st.session_state.auto_trade_last_time = now_cn()
-if "auto_refresh" not in st.session_state:
-    st.session_state.auto_refresh = False
 if "custom_symbol" not in st.session_state:
     st.session_state.custom_symbol = ""
 
 # 配置项默认值（刷新后保存）
 st.session_state.setdefault("auto_interval", 60)
-st.session_state.setdefault("max_positions", 3)
+st.session_state.setdefault("max_positions", 5)          # 默认最大持仓数改为5
 st.session_state.setdefault("risk_pct", 10)
 st.session_state.setdefault("min_score", 60)
 st.session_state.setdefault("capital", 100)
-st.session_state.setdefault("max_price", 1.0)
+st.session_state.setdefault("max_price", 5.0)            # 最高价默认改为5（10以下）
 st.session_state.setdefault("stop_loss_pct", 2.0)
 st.session_state.setdefault("take_profit_pct", 5.0)
+st.session_state.setdefault("auto_refresh", True)        # 默认启用实时刷新
 
 st.title("🤖 AlphaPilot AI - 合约智能交易终端")
 st.caption("币安U本位 | 多空双向 | 低价币扫描 | 遗传/贝叶斯优化 | 自适应学习 | 自动止盈止损 | AI自动交易 | 实时刷新")
@@ -170,7 +169,7 @@ with st.sidebar:
                 for trade in result["trades"]:
                     st.toast(f"🤖 {trade['action']} {trade['symbol']} @ {trade['price']:.6f} (杠杆:{trade['leverage']}x)")
 
-    # 强制平仓所有持仓按钮（修正缩进）
+    # 强制平仓所有持仓按钮
     if st.button("🔒 强制平仓所有持仓", use_container_width=True):
         if st.session_state.trader.holdings:
             closing_prices = {}
@@ -417,9 +416,9 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
 
             fr_data = funding_rates.get(sym)
             if fr_data:
-                funding_rate_pct = fr_data["funding_rate"] * 100
+                funding_rate_pct = fr_data * 100
                 notional = pos["notional"]
-                estimated_funding = notional * fr_data["funding_rate"]
+                estimated_funding = notional * fr_data
                 funding_str = f"{funding_rate_pct:.4f}%"
                 if pos["side"] == "LONG":
                     funding_cost_str = f"{estimated_funding:+.4f} U"
@@ -447,6 +446,7 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
         st.dataframe(pd.DataFrame(holdings_data), use_container_width=True)
         st.write(f"**合计** | 占用保证金: {total_margin:.2f} U | 浮动盈亏: {total_unrealized:+.2f} U")
 
+        # 为每个持仓币种单独生成强制平仓按钮
         st.subheader("🛒 强制平仓")
         num_holdings = len(st.session_state.trader.holdings)
         cols_per_row = 3
