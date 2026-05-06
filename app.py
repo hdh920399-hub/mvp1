@@ -170,7 +170,7 @@ with st.sidebar:
                 for trade in result["trades"]:
                     st.toast(f"🤖 {trade['action']} {trade['symbol']} @ {trade['price']:.6f} (杠杆:{trade['leverage']}x)")
 
-    # 手动平仓按钮
+    # 手动平仓所有持仓按钮
     if st.button("🔒 手动平仓所有持仓", use_container_width=True):
         if st.session_state.trader.holdings:
             closing_prices = {}
@@ -386,9 +386,9 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
-# ---------- 详细交易明细（含手动刷新按钮和合计行）----------
+# ---------- 详细交易明细（含一键平仓按钮）----------
 with st.expander("📊 详细交易盈亏明细", expanded=False):
-    # 在表格上方添加手动刷新按钮
+    # 手动刷新持仓价格按钮
     col_btn_refresh, _ = st.columns([1, 5])
     with col_btn_refresh:
         if st.button("🔄 刷新持仓价格", key="refresh_holdings_price"):
@@ -449,6 +449,39 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
             })
         st.dataframe(pd.DataFrame(holdings_data), use_container_width=True)
         st.write(f"**合计** | 开仓总额: {total_open:.2f} U | 占用保证金: {total_margin:.2f} U | 浮动盈亏: {total_unrealized:+.2f} U")
+
+        # 为每个持仓币种单独生成平仓按钮
+        st.subheader("🛒 一键平仓")
+        # 使用列布局，每行放3个按钮（可自行调整）
+        num_holdings = len(st.session_state.trader.holdings)
+        cols_per_row = 3
+        rows = (num_holdings + cols_per_row - 1) // cols_per_row
+        for row in range(rows):
+            col_btns = st.columns(cols_per_row)
+            for col_idx in range(cols_per_row):
+                idx = row * cols_per_row + col_idx
+                if idx >= num_holdings:
+                    break
+                sym = list(st.session_state.trader.holdings.keys())[idx]
+                pos = st.session_state.trader.holdings[sym]
+                current_price = current_prices.get(sym, pos["avg_price"])
+                with col_btns[col_idx]:
+                    st.caption(f"{sym} | 当前价: {current_price:.6f}")
+                    if st.button(f"❌ 平仓 {sym}", key=f"close_single_{sym}"):
+                        # 执行平仓
+                        closed = st.session_state.trader.update_positions({sym: current_price})
+                        if closed:
+                            for c in closed:
+                                st.session_state.adaptive_learner.record_trade({
+                                    "symbol": c["symbol"],
+                                    "pnl": c["pnl"],
+                                    "timestamp": now_cn()
+                                })
+                            save_trader_state()
+                            st.toast(f"✅ 已平仓 {sym}，盈亏 {closed[0]['pnl']:+.2f} U")
+                            st.rerun()
+                        else:
+                            st.toast(f"❌ 平仓 {sym} 失败，请检查价格或网络")
     else:
         st.info("📭 当前无持仓")
 
