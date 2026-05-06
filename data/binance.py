@@ -2,6 +2,7 @@ import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from datetime import datetime
 
 FUTURES_BASE_URL = "https://fapi.binance.com"
 
@@ -41,10 +42,25 @@ def get_all_hot_symbols(limit=100):
         if resp.status_code == 200:
             data = resp.json()
             usdt_symbols = [item["symbol"] for item in data if item["symbol"].endswith("USDT")]
-            # 按成交量粗略排序（取前limit个）
             usdt_symbols_sorted = sorted(usdt_symbols, key=lambda x: float(next((item["quoteVolume"] for item in data if item["symbol"]==x), 0)), reverse=True)
             return usdt_symbols_sorted[:limit]
     except Exception as e:
         print(f"获取热门币种失败: {e}")
-    # 备用列表
     return ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
+
+def get_current_funding_rate(symbol):
+    """获取当前资金费率（最新）"""
+    url = f"{FUTURES_BASE_URL}/fapi/v1/fundingRate?symbol={symbol}"
+    try:
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data:
+                return {
+                    "funding_rate": float(data[0]['fundingRate']),
+                    "funding_time": datetime.fromtimestamp(data[0]['fundingTime'] / 1000),
+                    "next_funding_time": datetime.fromtimestamp(data[0]['fundingTime'] / 1000 + 8*3600)  # 8小时后
+                }
+    except Exception as e:
+        print(f"获取资金费率失败 {symbol}: {e}")
+    return None
