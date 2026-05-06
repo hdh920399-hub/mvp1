@@ -65,7 +65,9 @@ class SimulatedTrader:
             "stop_loss": price * (1 - sl_pct),
             "take_profit": price * (1 + tp_pct),
             "leverage": leverage,
-            "margin": margin
+            "margin": margin,
+            "notional": usdt_amount,
+            "open_time": datetime.now()
         }
         self.balance -= margin
         self.trades.append({
@@ -75,6 +77,8 @@ class SimulatedTrader:
             "entry_price": price,
             "quantity": quantity,
             "margin": margin,
+            "notional": usdt_amount,
+            "leverage": leverage,
             "pnl": 0
         })
         self.save_state()
@@ -94,7 +98,9 @@ class SimulatedTrader:
             "stop_loss": price * (1 + sl_pct),
             "take_profit": price * (1 - tp_pct),
             "leverage": leverage,
-            "margin": margin
+            "margin": margin,
+            "notional": usdt_amount,
+            "open_time": datetime.now()
         }
         self.balance -= margin
         self.trades.append({
@@ -104,6 +110,8 @@ class SimulatedTrader:
             "entry_price": price,
             "quantity": quantity,
             "margin": margin,
+            "notional": usdt_amount,
+            "leverage": leverage,
             "pnl": 0
         })
         self.save_state()
@@ -142,6 +150,8 @@ class SimulatedTrader:
                     "exit_price": price,
                     "quantity": pos["quantity"],
                     "margin": margin_used,
+                    "notional": pos["notional"],
+                    "leverage": pos["leverage"],
                     "pnl": pnl,
                     "reason": reason
                 })
@@ -169,6 +179,8 @@ class SimulatedTrader:
             "exit_price": current_price,
             "quantity": pos["quantity"],
             "margin": margin_used,
+            "notional": pos["notional"],
+            "leverage": pos["leverage"],
             "pnl": pnl,
             "reason": "manual_close"
         })
