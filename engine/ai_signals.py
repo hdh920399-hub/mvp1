@@ -18,7 +18,7 @@ def calculate_directional_signal(df):
     volume = df["volume"]
     reasons = []
 
-    # ---------- RSI (权重加大) ----------
+    # RSI
     delta = close.diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -43,7 +43,7 @@ def calculate_directional_signal(df):
         rsi_score = 0
         reasons.append(f"RSI={rsi:.1f}（中性区间）。")
 
-    # ---------- MACD (权重加大) ----------
+    # MACD
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
     macd_line = ema12 - ema26
@@ -67,7 +67,7 @@ def calculate_directional_signal(df):
         macd_score = 0
         reasons.append("MACD无明显信号。")
 
-    # ---------- 均线排列 (权重加大) ----------
+    # 均线
     ma20 = close.rolling(20).mean().iloc[-1]
     ma50 = close.rolling(50).mean().iloc[-1] if len(df) >= 50 else ma20
     ma200 = close.rolling(200).mean().iloc[-1] if len(df) >= 200 else ma50
@@ -95,7 +95,7 @@ def calculate_directional_signal(df):
         ma_score = 0
         reasons.append("均线交织，趋势不明。")
 
-    # ---------- 成交量 ----------
+    # 成交量
     avg_volume = volume.rolling(20).mean().iloc[-1]
     vol_ratio = volume.iloc[-1] / avg_volume if avg_volume > 0 else 1
     if vol_ratio > 1.5:
@@ -108,7 +108,6 @@ def calculate_directional_signal(df):
         vol_score = 0
         reasons.append("成交量正常或萎缩。")
 
-    # ---------- 净得分 ----------
     net_score = rsi_score + macd_score + ma_score + vol_score
     net_score = max(-100, min(100, net_score))
 
