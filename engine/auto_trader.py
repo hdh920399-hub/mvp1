@@ -3,10 +3,6 @@ from scanner.multi import scan_cheap_coins_with_signal
 import streamlit as st
 
 def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=60):
-    """
-    使用排行榜中的评分（0-100）来决定开仓，更直观。
-    min_score 默认 60，用户可调低到 40 测试。
-    """
     result = {"trades": []}
     if len(trader.holdings) >= max_positions:
         st.toast(f"⚠️ 已达最大持仓数 {max_positions}")
@@ -17,9 +13,9 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=6
         st.toast("❌ 未扫描到任何低价币")
         return result
 
-    # 按评分降序排序
     ranking_df = ranking_df.sort_values("评分", ascending=False)
-    st.toast(f"🔍 扫描到 {len(ranking_df)} 个币，最高评分: {ranking_df.iloc[0]['评分']}")
+    top_score = ranking_df.iloc[0]["评分"] if not ranking_df.empty else 0
+    st.toast(f"🔍 扫描到 {len(ranking_df)} 个币，最高评分: {top_score}")
 
     for _, row in ranking_df.iterrows():
         symbol = row["币种"] + "USDT"
@@ -52,5 +48,5 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=6
                 break
 
     if not result["trades"]:
-        st.toast(f"🤖 未发现评分 ≥ {min_score} 的币种，当前最高评分: {ranking_df.iloc[0]['评分'] if not ranking_df.empty else 0}")
+        st.toast(f"🤖 未发现评分 ≥ {min_score} 的币种，当前最高评分: {top_score}")
     return result
