@@ -1,3 +1,3 @@
 class GeneticOptimizer:
     def optimize(self, df):
-        return {"message": "遗传算法优化完成（演示）"}
+        return {"message": "优化完成（模拟）"}
