@@ -3,7 +3,7 @@ import numpy as np
 from data.binance import get_open_interest, get_funding_rate, get_top_long_short_ratio
 
 class MultiFactorScorer:
-    """四维度多因子评分引擎"""
+    """多因子评分引擎 - 修复版（信号与分数匹配）"""
     
     def __init__(self, df, price_now, symbol, volume_series, change_24h):
         self.df = df
@@ -16,19 +16,11 @@ class MultiFactorScorer:
         self.low = df["low"]
         self.volume = df["volume"]
         
-        # 权重配置（百分比）
-        self.weight_trend = 35
-        self.weight_momentum = 25
-        self.weight_volume = 15
-        self.weight_sentiment = 25
-        
         # 因子贡献值
         self.trend_score = 0
         self.momentum_score = 0
         self.volume_score = 0
         self.sentiment_score = 0
-        
-        # 因子详细解释
         self.factors_detail = []
 
     def calculate_rsi(self, period=14):
@@ -79,39 +71,37 @@ class MultiFactorScorer:
         ma200 = self.close.rolling(200).mean().iloc[-1] if len(self.df) >= 200 else ma50
 
         if self.price_now > ma20 > ma50 > ma200:
-            self.trend_score += 20
-            self.factors_detail.append("✅ 完全多头排列 (+20)")
+            self.trend_score += 25
+            self.factors_detail.append("✅ 完全多头排列 (+25)")
         elif self.price_now > ma20 and self.price_now > ma50:
-            self.trend_score += 12
-            self.factors_detail.append("✅ 价格在均线上方 (+12)")
+            self.trend_score += 15
+            self.factors_detail.append("✅ 价格在均线上方 (+15)")
         elif self.price_now < ma20 < ma50 < ma200:
-            self.trend_score -= 20
-            self.factors_detail.append("❌ 完全空头排列 (-20)")
+            self.trend_score -= 25
+            self.factors_detail.append("❌ 完全空头排列 (-25)")
         elif self.price_now < ma20 and self.price_now < ma50:
-            self.trend_score -= 12
-            self.factors_detail.append("❌ 价格在均线下方 (-12)")
+            self.trend_score -= 15
+            self.factors_detail.append("❌ 价格在均线下方 (-15)")
 
         # 价格相对MA20位置
         ma20_pos = (self.price_now - ma20) / ma20
         if ma20_pos > 0.03:
-            self.trend_score += 8
-            self.factors_detail.append(f"📈 价格高于MA20 {ma20_pos:.1%} (+8)")
+            self.trend_score += 10
+            self.factors_detail.append(f"📈 价格高于MA20 {ma20_pos:.1%} (+10)")
         elif ma20_pos < -0.03:
-            self.trend_score -= 8
-            self.factors_detail.append(f"📉 价格低于MA20 {abs(ma20_pos):.1%} (-8)")
+            self.trend_score -= 10
+            self.factors_detail.append(f"📉 价格低于MA20 {abs(ma20_pos):.1%} (-10)")
 
         adx, _ = self.calculate_adx()
         if adx > 40:
-            self.trend_score += 10
-            self.factors_detail.append(f"🔥 ADX={adx:.1f} 极强趋势 (+10)")
+            self.trend_score += 15
+            self.factors_detail.append(f"🔥 ADX={adx:.1f} 极强趋势 (+15)")
         elif adx > 25:
-            self.trend_score += 7
-            self.factors_detail.append(f"📊 ADX={adx:.1f} 强趋势 (+7)")
+            self.trend_score += 10
+            self.factors_detail.append(f"📊 ADX={adx:.1f} 强趋势 (+10)")
         elif adx > 20:
-            self.trend_score += 3
-            self.factors_detail.append(f"⚡ ADX={adx:.1f} 弱趋势 (+3)")
-        else:
-            self.factors_detail.append(f"🌀 ADX={adx:.1f} 无趋势 (0)")
+            self.trend_score += 5
+            self.factors_detail.append(f"⚡ ADX={adx:.1f} 弱趋势 (+5)")
 
     # ---------- 动量因子 ----------
     def calc_momentum_factor(self):
@@ -119,32 +109,30 @@ class MultiFactorScorer:
         _, _, macd_hist = self.calculate_macd()
 
         if rsi_val < 25:
-            self.momentum_score += 25
-            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 极端超卖 (+25)")
+            self.momentum_score += 30
+            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 极端超卖 (+30)")
         elif rsi_val > 75:
-            self.momentum_score -= 25
-            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 极端超买 (-25)")
+            self.momentum_score -= 30
+            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 极端超买 (-30)")
         elif rsi_val < 35:
-            self.momentum_score += 15
-            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 超卖区 (+15)")
+            self.momentum_score += 20
+            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 超卖区 (+20)")
         elif rsi_val > 65:
-            self.momentum_score -= 15
-            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 超买区 (-15)")
-        else:
-            self.factors_detail.append(f"⚪ RSI={rsi_val:.1f} 中性区 (0)")
+            self.momentum_score -= 20
+            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 超买区 (-20)")
 
         if macd_hist.iloc[-1] > 0 and macd_hist.iloc[-2] <= 0:
-            self.momentum_score += 15
-            self.factors_detail.append("✅ MACD金叉 (+15)")
+            self.momentum_score += 20
+            self.factors_detail.append("✅ MACD金叉 (+20)")
         elif macd_hist.iloc[-1] < 0 and macd_hist.iloc[-2] >= 0:
-            self.momentum_score -= 15
-            self.factors_detail.append("❌ MACD死叉 (-15)")
+            self.momentum_score -= 20
+            self.factors_detail.append("❌ MACD死叉 (-20)")
         elif macd_hist.iloc[-1] > 0:
-            self.momentum_score += 6
-            self.factors_detail.append("📈 MACD柱为正 (+6)")
+            self.momentum_score += 8
+            self.factors_detail.append("📈 MACD柱为正 (+8)")
         elif macd_hist.iloc[-1] < 0:
-            self.momentum_score -= 6
-            self.factors_detail.append("📉 MACD柱为负 (-6)")
+            self.momentum_score -= 8
+            self.factors_detail.append("📉 MACD柱为负 (-8)")
 
     # ---------- 成交量因子 ----------
     def calc_volume_factor(self):
@@ -152,24 +140,19 @@ class MultiFactorScorer:
         vol_ratio = self.volume_series.iloc[-1] / avg_volume if avg_volume > 0 else 1
 
         if vol_ratio > 2.0:
-            self.volume_score += 10
-            self.factors_detail.append(f"🔥 成交量巨量放大 ({vol_ratio:.1f}x) (+10)")
+            self.volume_score += 15
+            self.factors_detail.append(f"🔥 成交量巨量放大 ({vol_ratio:.1f}x) (+15)")
         elif vol_ratio > 1.5:
-            self.volume_score += 7
-            self.factors_detail.append(f"📊 成交量显著放大 ({vol_ratio:.1f}x) (+7)")
+            self.volume_score += 10
+            self.factors_detail.append(f"📊 成交量显著放大 ({vol_ratio:.1f}x) (+10)")
         elif vol_ratio > 1.2:
-            self.volume_score += 4
-            self.factors_detail.append(f"📈 成交量温和放大 ({vol_ratio:.1f}x) (+4)")
-        else:
-            self.factors_detail.append(f"⚪ 成交量正常 ({vol_ratio:.1f}x)")
+            self.volume_score += 5
+            self.factors_detail.append(f"📈 成交量温和放大 ({vol_ratio:.1f}x) (+5)")
 
         mfi = self.calculate_mfi()
         if mfi < 20 and self.momentum_score > 0:
-            self.volume_score += 5
-            self.factors_detail.append(f"💰 MFI={mfi:.1f} 超卖+放量 (+5)")
-        elif mfi > 80 and self.momentum_score < 0:
-            self.volume_score -= 5
-            self.factors_detail.append(f"⚠️ MFI={mfi:.1f} 超买+放量 (-5)")
+            self.volume_score += 8
+            self.factors_detail.append(f"💰 MFI={mfi:.1f} 超卖+放量 (+8)")
 
     # ---------- 市场情绪因子 ----------
     def calc_sentiment_factor(self):
@@ -180,38 +163,31 @@ class MultiFactorScorer:
         except:
             oi, funding, ls_ratio = 0, 0, 1.0
 
-        # 持仓量贡献
-        if oi > 5_000_000:  # 500万美金以上高OI
+        if oi > 10_000_000:
+            self.sentiment_score += 10
+            self.factors_detail.append(f"🔥 高持仓量 OI=${oi/1e6:.1f}M (+10)")
+        elif oi > 5_000_000:
             self.sentiment_score += 5
-            self.factors_detail.append(f"🔥 高持仓量 OI=${oi/1e6:.1f}M (+5)")
+            self.factors_detail.append(f"📊 持仓量 OI=${oi/1e6:.1f}M (+5)")
 
-        # 资金费率贡献
         funding_pct = funding * 100
         if funding < -0.05:
-            self.sentiment_score += 5
-            self.factors_detail.append(f"📉 资金费率 {funding_pct:.3f}% (空头拥挤) (+5)")
+            self.sentiment_score += 10
+            self.factors_detail.append(f"📉 资金费率 {funding_pct:.3f}% (空头拥挤，利好做多) (+10)")
         elif funding > 0.1:
-            self.sentiment_score -= 5
-            self.factors_detail.append(f"📈 资金费率 {funding_pct:.3f}% (多头拥挤) (-5)")
-        elif funding < -0.01:
-            self.sentiment_score += 2
-            self.factors_detail.append(f"📉 资金费率 {funding_pct:.3f}% (略偏负) (+2)")
-        elif funding > 0.03:
-            self.sentiment_score -= 2
-            self.factors_detail.append(f"📈 资金费率 {funding_pct:.3f}% (略偏高) (-2)")
+            self.sentiment_score -= 10
+            self.factors_detail.append(f"📈 资金费率 {funding_pct:.3f}% (多头拥挤) (-10)")
 
-        # 多空比贡献
         if ls_ratio > 1.5:
-            self.sentiment_score -= 4
-            self.factors_detail.append(f"⚖️ 多空比 {ls_ratio:.2f} (多头拥挤) (-4)")
-        elif ls_ratio < 0.7:
-            self.sentiment_score += 4
-            self.factors_detail.append(f"⚖️ 多空比 {ls_ratio:.2f} (空头拥挤) (+4)")
-
-        # 24h涨跌幅惩罚
-        if abs(self.change_24h) > 30:
             self.sentiment_score -= 8
-            self.factors_detail.append(f"⚠️ 24h振幅 {abs(self.change_24h):.1f}% 过大，风险较高 (-8)")
+            self.factors_detail.append(f"⚖️ 多空比 {ls_ratio:.2f} (多头拥挤) (-8)")
+        elif ls_ratio < 0.7:
+            self.sentiment_score += 8
+            self.factors_detail.append(f"⚖️ 多空比 {ls_ratio:.2f} (空头拥挤) (+8)")
+
+        if abs(self.change_24h) > 30:
+            self.sentiment_score -= 10
+            self.factors_detail.append(f"⚠️ 24h振幅 {abs(self.change_24h):.1f}% 过大 (-10)")
 
     # ---------- 综合评分 ----------
     def calculate_total_score(self):
@@ -220,38 +196,41 @@ class MultiFactorScorer:
         self.calc_volume_factor()
         self.calc_sentiment_factor()
 
-        weighted_trend = self.trend_score * (self.weight_trend / 100)
-        weighted_momentum = self.momentum_score * (self.weight_momentum / 100)
-        weighted_volume = self.volume_score * (self.weight_volume / 100)
-        weighted_sentiment = self.sentiment_score * (self.weight_sentiment / 100)
+        # 基础分70 + 各因子得分（总分范围理论上 -10 ~ 150）
+        total_raw = 70 + self.trend_score + self.momentum_score + self.volume_score + self.sentiment_score
+        # 限制在 0-100 之间
+        total_score = max(0, min(100, int(total_raw)))
 
-        total_score = weighted_trend + weighted_momentum + weighted_volume + weighted_sentiment
-        total_score = max(0, min(100, int(total_score)))
-
-        # 信号方向
-        if total_score >= 60:
-            signal_text = "🟢 强烈做多" if total_score >= 75 else "🟢 做多"
+        # 信号判定（根据分数线性映射）
+        if total_score >= 75:
+            signal_text = "🟢 强烈做多"
             direction = "LONG"
-        elif total_score <= 40:
-            signal_text = "🔴 强烈做空" if total_score <= 25 else "🔴 做空"
-            direction = "SHORT"
-        else:
+        elif total_score >= 60:
+            signal_text = "🟢 做多"
+            direction = "LONG"
+        elif total_score >= 40:
             signal_text = "⚪ 观望"
             direction = "NEUTRAL"
+        elif total_score >= 25:
+            signal_text = "🔴 做空"
+            direction = "SHORT"
+        else:
+            signal_text = "🔴 强烈做空"
+            direction = "SHORT"
 
         # 动态杠杆（基于ATR波动率）
         _, atr = self.calculate_adx()
         volatility_pct = atr / self.price_now * 100
-        if volatility_pct > 4:
+        if volatility_pct > 5:
             leverage = 1
-        elif volatility_pct > 2:
+        elif volatility_pct > 3:
             leverage = 3
-        else:
+        elif volatility_pct > 1.5:
             leverage = 5
+        else:
+            leverage = 10
 
         analysis = "；".join(self.factors_detail) + f"。综合评分：{total_score}分。建议杠杆：{leverage}x。方向：{direction}。"
-
-        # 保存RSI值用于展示
         rsi_val, _ = self.calculate_rsi()
 
         return {
