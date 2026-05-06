@@ -10,16 +10,12 @@ class SimulatedTrader:
         self.initial_balance = initial_balance
         self.stop_loss_pct = 0.02
         self.take_profit_pct = 0.05
-
-        # 尝试加载已有状态
         if not self.load_state():
-            # 首次初始化
             self.balance = initial_balance
             self.holdings = {}
             self.trades = []
 
     def save_state(self):
-        """保存当前状态到文件"""
         state = {
             "balance": self.balance,
             "holdings": self.holdings,
@@ -33,7 +29,6 @@ class SimulatedTrader:
             print(f"保存状态失败: {e}")
 
     def load_state(self):
-        """从文件加载状态，成功返回 True"""
         if not os.path.exists(STATE_FILE):
             return False
         try:
@@ -43,7 +38,6 @@ class SimulatedTrader:
                 self.holdings = state["holdings"]
                 self.trades = state["trades"]
                 self.initial_balance = state.get("initial_balance", self.initial_balance)
-                # 转换 timestamp 字符串为 datetime 对象
                 for t in self.trades:
                     if "timestamp" in t and isinstance(t["timestamp"], str):
                         t["timestamp"] = datetime.fromisoformat(t["timestamp"])
@@ -53,7 +47,6 @@ class SimulatedTrader:
             return False
 
     def _json_serial(self, obj):
-        """处理 datetime 对象序列化"""
         if isinstance(obj, datetime):
             return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
@@ -81,7 +74,7 @@ class SimulatedTrader:
             "quantity": quantity,
             "pnl": 0
         })
-        self.save_state()   # 自动保存
+        self.save_state()
         return True, f"买入 {quantity:.4f}"
 
     def short(self, symbol, price, usdt_amount, leverage=1):
@@ -132,7 +125,6 @@ class SimulatedTrader:
                 elif price <= pos["take_profit"]:
                     pnl = (pos["avg_price"] - price) * pos["quantity"]
                     reason = "take_profit"
-
             if reason:
                 margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
                 self.balance += margin_used + pnl
