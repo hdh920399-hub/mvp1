@@ -27,12 +27,24 @@ def get_klines(symbol, interval, limit=500):
                 df[col] = df[col].astype(float)
             return df[["time", "open", "high", "low", "close", "volume"]]
         else:
-            print(f"状态码异常: {resp.status_code}")
+            print(f"状态码异常: {resp.status_code}, 响应: {resp.text[:200]}")
             return None
     except Exception as e:
-        print(f"请求异常: {e}")
+        print(f"获取K线失败 {symbol}: {e}")
         return None
 
-def get_all_hot_symbols(limit=10):
-    # 简化版本，仅返回常用测试币种
-    return ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "MATICUSDT"]
+def get_all_hot_symbols(limit=100):
+    url = f"{FUTURES_BASE_URL}/fapi/v1/ticker/24hr"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            usdt_symbols = [item["symbol"] for item in data if item["symbol"].endswith("USDT")]
+            # 按成交量粗略排序（取前limit个）
+            usdt_symbols_sorted = sorted(usdt_symbols, key=lambda x: float(next((item["quoteVolume"] for item in data if item["symbol"]==x), 0)), reverse=True)
+            return usdt_symbols_sorted[:limit]
+    except Exception as e:
+        print(f"获取热门币种失败: {e}")
+    # 备用列表
+    return ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
