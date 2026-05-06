@@ -3,9 +3,6 @@ from datetime import datetime, timedelta
 import pandas as pd
 import time
 
-def now_cn():
-    return datetime.utcnow() + timedelta(hours=8)
-
 from data.binance import get_klines, get_all_hot_symbols
 from engine.ai_signals import calculate_directional_signal
 from engine.strategy_engine import StrategyEngine
@@ -20,9 +17,9 @@ from analysis.backtest_exporter import BacktestExporter
 from scanner.multi import scan_cheap_coins_with_signal
 from ui.chart import create_pro_chart
 
-
+# 时区：北京时间 = UTC+8
 def now_cn():
-    return datetime.now(tz)
+    return datetime.utcnow() + timedelta(hours=8)
 
 st.set_page_config(page_title="AlphaPilot AI", layout="wide", page_icon="🤖")
 
@@ -207,7 +204,7 @@ with st.sidebar:
         else:
             st.toast("当前无持仓")
 
-    # 刷新当前仓位价格按钮（手动刷新价格）
+    # 刷新当前仓位价格按钮
     if st.button("🔄 刷新当前仓位价格", use_container_width=True):
         new_prices = {}
         for sym in st.session_state.trader.holdings.keys():
@@ -345,7 +342,7 @@ with col_right:
     else:
         st.info("等待K线数据（至少50根）...")
 
-# ---------- 构建实时价格字典（支持手动刷新的缓存）----------
+# ---------- 构建实时价格字典 ----------
 if "current_prices" in st.session_state and st.session_state.current_prices:
     current_prices = st.session_state.current_prices
 else:
