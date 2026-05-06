@@ -152,7 +152,12 @@ with col_refresh:
         st.cache_data.clear()
         st.rerun()
 
-ranking_df, total_count = load_ranking_cached(max_price, st.session_state.ranking_limit)
+try:
+    ranking_df, total_count = load_ranking_cached(max_price, st.session_state.ranking_limit)
+except Exception as e:
+    st.error(f"❌ 加载排行榜失败: {e}")
+    ranking_df = pd.DataFrame()
+    total_count = 0
 
 if not ranking_df.empty:
     if "AI分析" in ranking_df.columns:
