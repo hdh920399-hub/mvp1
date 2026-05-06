@@ -52,7 +52,8 @@ class SimulatedTrader:
         raise TypeError(f"Type {type(obj)} not serializable")
 
     def buy(self, symbol, price, usdt_amount, leverage=1, stop_loss_pct=None, take_profit_pct=None):
-        margin = usdt_amount / leverage
+        # 逐仓保证金 = 开仓价值 / 杠杆
+        margin = (usdt_amount / price) * price / leverage  # 即 usdt_amount / leverage
         if margin > self.balance:
             return False, f"余额不足"
         quantity = usdt_amount / price
@@ -64,7 +65,8 @@ class SimulatedTrader:
             "side": "LONG",
             "stop_loss": price * (1 - sl_pct),
             "take_profit": price * (1 + tp_pct),
-            "leverage": leverage
+            "leverage": leverage,
+            "margin": margin   # 记录占用保证金
         }
         self.balance -= margin
         self.trades.append({
@@ -92,7 +94,8 @@ class SimulatedTrader:
             "side": "SHORT",
             "stop_loss": price * (1 + sl_pct),
             "take_profit": price * (1 - tp_pct),
-            "leverage": leverage
+            "leverage": leverage,
+            "margin": margin
         }
         self.balance -= margin
         self.trades.append({
@@ -130,7 +133,7 @@ class SimulatedTrader:
                     pnl = (pos["avg_price"] - price) * pos["quantity"]
                     reason = "take_profit"
             if reason:
-                margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
+                margin_used = pos["margin"]   # 释放保证金
                 self.balance += margin_used + pnl
                 self.trades.append({
                     "timestamp": datetime.now(),
@@ -152,6 +155,7 @@ class SimulatedTrader:
     def get_total_asset(self, current_prices=None):
         if current_prices is None:
             current_prices = {}
+        # 总资产 = 可用余额 + 所有持仓的浮动盈亏总和
         total_unrealized = 0.0
         for symbol, pos in self.holdings.items():
             price = current_prices.get(symbol, pos["avg_price"])
@@ -167,7 +171,7 @@ class SimulatedTrader:
         realized_pnl = sum(t.get("pnl", 0) for t in closed)
         win_rate = len([t for t in closed if t.get("pnl", 0) > 0]) / max(1, len(closed)) * 100
         total_asset = self.get_total_asset(current_prices)
-        # 收益率改为基于已实现盈亏
+        # 收益率只基于已实现盈亏
         return_percent = (realized_pnl / self.initial_balance) * 100
         return {
             "初始本金": self.initial_balance,
