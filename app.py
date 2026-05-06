@@ -154,11 +154,45 @@ if not ranking_df.empty:
                 return 'background-color: #f57c00; color: white'
             return 'background-color: #c62828; color: white'
         return ''
+    if not ranking_df.empty:
+    def highlight_score(val):
+        if isinstance(val, (int, float)):
+            if val >= 70:
+                return 'background-color: #2e7d32; color: white'
+            if val >= 55:
+                return 'background-color: #1565c0; color: white'
+            if val >= 40:
+                return 'background-color: #f57c00; color: white'
+            return 'background-color: #c62828; color: white'
+        return ''
+
+    # 确保 AI分析 列存在
     if "AI分析" not in ranking_df.columns:
-        ranking_df["AI分析"] = "暂无"
-    display_cols = ["币种", "价格", "24h涨跌", "24h量(百万U)", "RSI", "AI信号", "评分", "AI分析"]
+        ranking_df["AI分析"] = "暂无详细分析"
+
+    # 提取交易摘要（入场/止损/止盈）
+    import re
+    def extract_summary(analysis):
+        match = re.search(r'入场\s*([\d.]+).*?止损\s*([\d.]+).*?止盈\s*([\d.]+)', analysis)
+        if match:
+            return f"📈 {match.group(1)} / 🛑 {match.group(2)} / 🎯 {match.group(3)}"
+        return "点击下方查看详情"
+    ranking_df["交易摘要"] = ranking_df["AI分析"].apply(extract_summary)
+
+    # 表格只显示摘要，不显示原始长文本
+    display_cols = ["币种", "价格", "24h涨跌", "24h量(百万U)", "RSI", "AI信号", "评分", "交易摘要"]
     available_cols = [c for c in display_cols if c in ranking_df.columns]
-    st.dataframe(ranking_df[available_cols].style.map(highlight_score, subset=['评分']), use_container_width=True)
+    styled = ranking_df[available_cols].style.map(highlight_score, subset=['评分'])
+    st.dataframe(styled, use_container_width=True, height=500)
+    st.caption(f"💡 共 {total_count} 个低价币 | ≥70强烈推荐 | 55-69值得关注 | <40建议避开")
+
+    # 在表格下方用 expander 显示完整 AI 分析（可选，点击展开）
+    with st.expander("📖 查看所有币种的完整AI分析"):
+        for _, row in ranking_df.iterrows():
+            st.markdown(f"**{row['币种']}**：{row['AI分析']}")
+            st.markdown("---")
+else:
+    st.warning("暂无数据，请调高价格上限")
     st.caption(f"💡 共 {total_count} 个低价币 | ≥70强烈推荐 | 55-69值得关注 | <40建议避开")
 else:
     st.warning("暂无数据，请调高价格上限")
