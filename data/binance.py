@@ -48,9 +48,9 @@ def get_all_hot_symbols(limit=100):
         print(f"获取热门币种失败: {e}")
     return ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
 
-# ---------- 以下为多因子评分所需的合约数据接口 ----------
+# ---------- 合约数据接口（资金费率、持仓量、多空比） ----------
 def get_funding_rate(symbol):
-    """获取当前资金费率（与 multi_factor_score 中的导入名称一致）"""
+    """获取当前资金费率"""
     url = f"{FUTURES_BASE_URL}/fapi/v1/premiumIndex"
     try:
         resp = requests.get(url, params={"symbol": symbol}, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
@@ -60,6 +60,11 @@ def get_funding_rate(symbol):
     except Exception as e:
         print(f"获取资金费率失败 {symbol}: {e}")
     return 0
+
+# 为了兼容现有代码，添加别名函数 get_current_funding_rate
+def get_current_funding_rate(symbol):
+    """别名：同 get_funding_rate"""
+    return get_funding_rate(symbol)
 
 def get_open_interest(symbol):
     """获取当前持仓量（美元计价）"""
