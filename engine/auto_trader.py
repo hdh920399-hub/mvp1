@@ -1,10 +1,12 @@
-
 from data.binance import get_klines
-from engine.ai_signals import calculate_directional_signal
 from scanner.multi import scan_cheap_coins_with_signal
 import streamlit as st
 
-def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=15):
+def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=60):
+    """
+    使用排行榜中的评分（0-100）来决定开仓，更直观。
+    min_score 默认 60，用户可调低到 40 测试。
+    """
     result = {"trades": []}
     if len(trader.holdings) >= max_positions:
         st.toast(f"⚠️ 已达最大持仓数 {max_positions}")
@@ -15,52 +17,40 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=1
         st.toast("❌ 未扫描到任何低价币")
         return result
 
-    candidates = []
+    # 按评分降序排序
+    ranking_df = ranking_df.sort_values("评分", ascending=False)
+    st.toast(f"🔍 扫描到 {len(ranking_df)} 个币，最高评分: {ranking_df.iloc[0]['评分']}")
+
     for _, row in ranking_df.iterrows():
         symbol = row["币种"] + "USDT"
-        df = get_klines(symbol, "1h", limit=50)
-        if df is not None and len(df) >= 30:
-            sig = calculate_directional_signal(df)
-            candidates.append({
-                "symbol": symbol,
-                "price": row["价格"],
-                "net_score": sig["net_score"],
-                "long_score": sig["long_score"],
-                "short_score": sig["short_score"]
-            })
-        else:
-            candidates.append({
-                "symbol": symbol,
-                "price": row["价格"],
-                "net_score": 0,
-                "long_score": 0,
-                "short_score": 0
-            })
+        score = row["评分"]
+        price = row["价格"]
+        signal_type = row["AI信号"]
 
-    # 显示扫描结果（前3个币种的净得分）
-    summary = " | ".join([f"{c['symbol']}:净{c['net_score']}" for c in candidates[:3]])
-    st.toast(f"🔍 扫描结果: {summary}")
-
-    candidates.sort(key=lambda x: x["net_score"], reverse=True)
-
-    for c in candidates:
-        if c["symbol"] in trader.holdings:
+        if symbol in trader.holdings:
             continue
-        if c["net_score"] >= min_score:
+
+        if score >= min_score:
             usdt_amount = max(5, trader.balance * risk_pct)
-            success, msg = trader.buy(c["symbol"], c["price"], usdt_amount, leverage=1)
+            if "超卖" in signal_type or "偏多" in signal_type or score >= 70:
+                success, msg = trader.buy(symbol, price, usdt_amount, leverage=1)
+                action = "BUY"
+            elif "超买" in signal_type or "偏空" in signal_type:
+                success, msg = trader.short(symbol, price, usdt_amount, leverage=1)
+                action = "SHORT"
+            else:
+                continue
+
             if success:
-                result["trades"].append({"action": "BUY", "symbol": c["symbol"], "price": c["price"], "amount": usdt_amount})
-                st.toast(f"✅ 自动开多 {c['symbol']} @ {c['price']:.6f} (净得分:{c['net_score']})")
-                break
-        elif c["net_score"] <= -min_score:
-            usdt_amount = max(5, trader.balance * risk_pct)
-            success, msg = trader.short(c["symbol"], c["price"], usdt_amount, leverage=1)
-            if success:
-                result["trades"].append({"action": "SHORT", "symbol": c["symbol"], "price": c["price"], "amount": usdt_amount})
-                st.toast(f"✅ 自动开空 {c['symbol']} @ {c['price']:.6f} (净得分:{c['net_score']})")
+                result["trades"].append({
+                    "action": action,
+                    "symbol": symbol,
+                    "price": price,
+                    "amount": usdt_amount
+                })
+                st.toast(f"✅ 自动{action} {symbol} @ {price:.6f} (评分:{score})")
                 break
 
     if not result["trades"]:
-        st.toast("🤖 未发现满足开仓条件的币种（净得分绝对值低于阈值）")
+        st.toast(f"🤖 未发现评分 ≥ {min_score} 的币种，当前最高评分: {ranking_df.iloc[0]['评分'] if not ranking_df.empty else 0}")
     return result
