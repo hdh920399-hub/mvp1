@@ -85,7 +85,7 @@ if "custom_symbol" not in st.session_state:
 st.session_state.setdefault("auto_interval", 60)
 st.session_state.setdefault("max_positions", 5)          # 默认最大持仓数改为5
 st.session_state.setdefault("risk_pct", 10)
-st.session_state.setdefault("min_score", 60)
+st.session_state.setdefault("min_score", 20)
 st.session_state.setdefault("capital", 100)
 st.session_state.setdefault("max_price", 5.0)            # 最高价默认改为5（10以下）
 st.session_state.setdefault("stop_loss_pct", 2.0)
