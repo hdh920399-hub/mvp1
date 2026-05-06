@@ -1,8 +1,9 @@
-import streamlit as st
 from datetime import datetime, timedelta
 import pandas as pd
 import time
-import pytz
+
+def now_cn():
+    return datetime.utcnow() + timedelta(hours=8)
 
 from data.binance import get_klines, get_all_hot_symbols
 from engine.ai_signals import calculate_directional_signal
