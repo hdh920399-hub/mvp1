@@ -4,7 +4,6 @@ import pandas as pd
 import time
 
 from data.binance import get_klines, get_all_hot_symbols, get_current_funding_rate
-from data.binance import get_klines, get_all_hot_symbols
 from engine.ai_signals import calculate_directional_signal
 from engine.strategy_engine import StrategyEngine
 from engine.param_optimizer import GeneticOptimizer
@@ -171,10 +170,9 @@ with st.sidebar:
                 for trade in result["trades"]:
                     st.toast(f"🤖 {trade['action']} {trade['symbol']} @ {trade['price']:.6f} (杠杆:{trade['leverage']}x)")
 
-    # 强制平仓所有持仓按钮（取代原手动平仓）
+    # 强制平仓所有持仓按钮
     if st.button("🔒 强制平仓所有持仓", use_container_width=True):
         if st.session_state.trader.holdings:
-            # 获取所有持仓币种的当前价格
             closing_prices = {}
             for sym in st.session_state.trader.holdings.keys():
                 price = None
@@ -347,7 +345,7 @@ else:
                 current_prices[sym] = st.session_state.trader.holdings[sym]["avg_price"]
     st.session_state.current_prices = current_prices
 
-# ---------- 账户表现 ----------
+# ---------- 账户表现（行业标准） ----------
 st.markdown("---")
 perf = st.session_state.trader.get_performance(current_prices)
 
@@ -365,7 +363,7 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
-# ---------- 详细交易明细（含资金费率）----------
+# ---------- 详细交易明细（含资金费率，合计行只显示保证金和浮动盈亏）----------
 with st.expander("📊 详细交易盈亏明细", expanded=False):
     # 手动刷新持仓价格按钮
     col_btn_refresh, _ = st.columns([1, 5])
@@ -396,10 +394,9 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
     if st.session_state.trader.holdings:
         st.subheader("📌 当前持仓 (未平仓)")
         holdings_data = []
-        total_open = 0.0
         total_margin = 0.0
         total_unrealized = 0.0
-        # 获取所有持仓币种的资金费率（避免重复请求）
+        # 获取资金费率（仅展示）
         funding_rates = {}
         for sym in st.session_state.trader.holdings.keys():
             fr = get_current_funding_rate(sym)
@@ -414,20 +411,20 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
             else:
                 unrealized_pnl = (pos["avg_price"] - current_price) * pos["quantity"]
                 unrealized_pnl_pct = (1 - current_price / pos["avg_price"]) * 100
-            total_amount = pos["avg_price"] * pos["quantity"]
-            margin = pos.get("margin", total_amount / pos.get("leverage", 1))
-            total_open += total_amount
+            margin = pos.get("margin", pos["avg_price"] * pos["quantity"] / pos.get("leverage", 1))
             total_margin += margin
             total_unrealized += unrealized_pnl
 
-            # 资金费率信息
             fr_data = funding_rates.get(sym)
             if fr_data:
                 funding_rate_pct = fr_data["funding_rate"] * 100
                 notional = pos["notional"]
                 estimated_funding = notional * fr_data["funding_rate"]
                 funding_str = f"{funding_rate_pct:.4f}%"
-                funding_cost_str = f"{estimated_funding:+.4f} U"
+                if pos["side"] == "LONG":
+                    funding_cost_str = f"{estimated_funding:+.4f} U"
+                else:
+                    funding_cost_str = f"{-estimated_funding:+.4f} U"
             else:
                 funding_str = "N/A"
                 funding_cost_str = "N/A"
@@ -438,7 +435,6 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                 "开仓价": round(pos["avg_price"], 6),
                 "当前价": round(current_price, 6),
                 "数量": pos["quantity"],
-                "开仓总额(USDT)": round(total_amount, 2),
                 "占用保证金(USDT)": round(margin, 2),
                 "浮动盈亏(USDT)": round(unrealized_pnl, 2),
                 "盈亏%": f"{unrealized_pnl_pct:+.2f}%",
@@ -449,9 +445,9 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                 "预估资金费": funding_cost_str
             })
         st.dataframe(pd.DataFrame(holdings_data), use_container_width=True)
-        st.write(f"**合计** | 开仓总额: {total_open:.2f} U | 占用保证金: {total_margin:.2f} U | 浮动盈亏: {total_unrealized:+.2f} U")
+        st.write(f"**合计** | 占用保证金: {total_margin:.2f} U | 浮动盈亏: {total_unrealized:+.2f} U")
 
-        # 一键平仓按钮（同上，不变）
+        # 为每个持仓币种单独生成强制平仓按钮
         st.subheader("🛒 强制平仓")
         num_holdings = len(st.session_state.trader.holdings)
         cols_per_row = 3
@@ -468,6 +464,7 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                 with col_btns[col_idx]:
                     st.caption(f"{sym} | 当前价: {current_price:.6f}")
                     if st.button(f"❌ 强制平仓 {sym}", key=f"force_close_single_{sym}"):
+                        # 重新获取最新价格
                         price = None
                         if not ranking_df.empty:
                             row = ranking_df[ranking_df["币种"] + "USDT" == sym]
@@ -495,19 +492,19 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
     else:
         st.info("📭 当前无持仓")
 
-    # 历史平仓记录（不变）
     if st.session_state.trader.trades:
         closed_trades = [t for t in st.session_state.trader.trades if t.get("action") == "CLOSE"]
         if closed_trades:
             st.subheader("📜 历史平仓记录")
             df_trades = pd.DataFrame(closed_trades)
-            show_cols = ["timestamp", "symbol", "action", "entry_price", "exit_price", "quantity", "margin", "pnl", "reason"]
+            show_cols = ["timestamp", "symbol", "action", "entry_price", "exit_price", "quantity", "margin", "pnl", "funding_cost", "reason"]
             available = [c for c in show_cols if c in df_trades.columns]
             st.dataframe(df_trades[available], use_container_width=True)
         else:
             st.info("暂无平仓记录，等待止盈止损触发")
     else:
         st.info("暂无任何交易记录")
+
 # ---------- 深度优化引擎 ----------
 st.markdown("---")
 with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
