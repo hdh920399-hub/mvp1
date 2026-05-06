@@ -13,13 +13,13 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             headers={'User-Agent': 'Mozilla/5.0'}
         )
         if resp.status_code != 200:
-            raise Exception(f"API 状态码异常: {resp.status_code}")
+            raise Exception(f"API状态码异常: {resp.status_code}")
         data = resp.json()
     except Exception as e:
-        # 真实 API 失败，直接抛出错误，不生成模拟数据
+        # 真实数据获取失败，直接抛出异常（不生成模拟数据）
         raise Exception(f"无法获取币安24h行情数据: {e}")
 
-    # 2. 筛选低价币
+    # 2. 筛选低价币（价格 ≤ max_price，成交量 > 50000 USDT）
     cheap = []
     for item in data:
         sym = item["symbol"]
@@ -37,7 +37,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 "low": float(item["lowPrice"])
             })
     if not cheap:
-        # 没有满足筛选条件的币种，返回空 DataFrame 并在界面提示
+        # 无满足条件的币种，返回空 DataFrame（界面会提示用户调高价格上限）
         return pd.DataFrame(), 0
 
     cheap.sort(key=lambda x: x["volume"], reverse=True)
@@ -49,7 +49,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
         try:
             df = get_klines(symbol, "1h", limit=60)
             if df is None or len(df) < 30:
-                # 如果 K 线数据不足，跳过该币种（或视为无效）
+                # K线数据不足，跳过该币种（不计入结果）
                 print(f"跳过 {symbol}: K线数据不足")
                 continue
 
@@ -57,7 +57,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             high = df["high"]
             low = df["low"]
 
-            # RSI
+            # ---------- RSI ----------
             delta = close.diff()
             gain = delta.where(delta > 0, 0)
             loss = -delta.where(delta < 0, 0)
@@ -67,12 +67,12 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
             rsi = round(rsi_val, 1)
 
-            # ATR
+            # ---------- ATR ----------
             tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
             atr = tr.rolling(14).mean().iloc[-1]
             price_now = coin["price"]
 
-            # 基础评分与信号
+            # ---------- 基础评分与信号 ----------
             if rsi < 30:
                 score = 80
                 signal = "🟢超卖"
@@ -94,7 +94,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 signal = "⚪中性"
                 base = f"RSI={rsi}（中性区间）。"
 
-            # 均线描述
+            # ---------- 均线描述 ----------
             ma20 = close.rolling(20).mean().iloc[-1]
             ma50 = close.rolling(50).mean().iloc[-1] if len(df) >= 50 else ma20
             if price_now > ma20 and price_now > ma50:
@@ -104,7 +104,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             else:
                 ma_desc = "价格介于均线之间，趋势不明朗。"
 
-            # 成交量分析
+            # ---------- 成交量分析 ----------
             avg_vol = df["volume"].rolling(20).mean().iloc[-1]
             vol_ratio = df["volume"].iloc[-1] / avg_vol if avg_vol != 0 else 1
             if vol_ratio > 1.5:
@@ -114,7 +114,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             else:
                 vol_desc = "成交量正常或萎缩，动能不足。"
 
-            # 24h涨跌描述
+            # ---------- 24h涨跌描述 ----------
             chg = coin["change"]
             if chg > 10:
                 chg_desc = "24h涨幅较大，注意追高风险。"
@@ -123,7 +123,35 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             else:
                 chg_desc = "24h波动温和。"
 
-            # 交易策略建议
+            # ---------- 动态杠杆计算（1-20倍）----------
+            # 计算 ADX（14周期趋势强度）
+            def calc_adx(df, period=14):
+                high, low, close = df["high"], df["low"], df["close"]
+                plus_dm = high.diff()
+                minus_dm = low.diff()
+                plus_dm[plus_dm < 0] = 0
+                minus_dm[minus_dm > 0] = 0
+                tr_val = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+                atr_val = tr_val.rolling(period).mean()
+                plus_di = 100 * (plus_dm.rolling(period).mean() / atr_val)
+                minus_di = 100 * (minus_dm.rolling(period).mean() / atr_val)
+                dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di + 0.001)
+                adx = dx.rolling(period).mean().iloc[-1]
+                return adx if not pd.isna(adx) else 20
+
+            adx = calc_adx(df, period=14)
+
+            volatility_pct = atr / price_now * 100
+            base_leverage = 20
+            volatility_factor = max(0.2, min(1.0, 3.0 / (volatility_pct + 0.5)))
+            adx_factor = min(1.5, max(0.5, adx / 40))
+            score_factor = 0.8 + (score - 50) / 100   # 评分50对应0.8，100对应1.3
+            rsi_penalty = 0.7 if (rsi > 80 or rsi < 20) else 1.0
+
+            leverage = base_leverage * volatility_factor * adx_factor * score_factor * rsi_penalty
+            leverage = max(1, min(20, round(leverage)))
+
+            # ---------- 交易策略建议 ----------
             if score >= 70:
                 direction = "做多"
                 entry = price_now
@@ -131,7 +159,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 take_profit = entry + 3 * atr
                 risk_pct = (entry - stop_loss) / entry * 100
                 position_pct = min(0.2, 0.02 / (risk_pct / 100)) if risk_pct > 0 else 0.1
-                leverage = max(1, min(5, int(5 / (atr/price_now * 100))))
                 trade_advice = f"【交易策略】{direction} 入场 {entry:.4f}，止损 {stop_loss:.4f}，止盈 {take_profit:.4f}，建议仓位 {position_pct*100:.1f}%，杠杆 {leverage}x。"
             elif score <= 20:
                 direction = "做空"
@@ -140,7 +167,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 take_profit = entry - 3 * atr
                 risk_pct = (stop_loss - entry) / entry * 100
                 position_pct = min(0.2, 0.02 / (risk_pct / 100)) if risk_pct > 0 else 0.1
-                leverage = max(1, min(5, int(5 / (atr/price_now * 100))))
                 trade_advice = f"【交易策略】{direction} 入场 {entry:.4f}，止损 {stop_loss:.4f}，止盈 {take_profit:.4f}，建议仓位 {position_pct*100:.1f}%，杠杆 {leverage}x。"
             else:
                 trade_advice = "【交易策略】信号中性，建议观望。"
@@ -159,6 +185,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 "RSI": rsi,
                 "AI信号": signal,
                 "评分": score,
+                "建议杠杆": leverage,
                 "AI分析": analysis
             })
         except Exception as e:
@@ -167,7 +194,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             continue
 
     if not results:
-        # 没有任何币种成功计算出分析结果，返回空 DataFrame
         return pd.DataFrame(), 0
 
     results.sort(key=lambda x: x["评分"], reverse=True)
