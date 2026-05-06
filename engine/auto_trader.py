@@ -1,7 +1,8 @@
 import streamlit as st
 from scanner.multi import scan_cheap_coins_with_signal
 
-def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=20):
+def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=20,
+               stop_loss_pct=None, take_profit_pct=None):
     result = {"trades": []}
     if len(trader.holdings) >= max_positions:
         st.toast(f"⚠️ 已达最大持仓数 {max_positions}")
@@ -27,11 +28,13 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=2
 
         if score >= min_score:
             usdt_amount = max(5, trader.balance * risk_pct)
-            if "做多" in signal_type:          # 匹配“做多”和“强烈做多”
-                success, msg = trader.buy(symbol, price, usdt_amount, leverage=leverage)
+            if "做多" in signal_type:
+                success, msg = trader.buy(symbol, price, usdt_amount, leverage=leverage,
+                                          stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct)
                 action = "BUY"
-            elif "做空" in signal_type:        # 匹配“做空”和“强烈做空”
-                success, msg = trader.short(symbol, price, usdt_amount, leverage=leverage)
+            elif "做空" in signal_type:
+                success, msg = trader.short(symbol, price, usdt_amount, leverage=leverage,
+                                            stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct)
                 action = "SHORT"
             else:
                 continue
@@ -44,7 +47,6 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=2
                     "leverage": leverage
                 })
                 st.toast(f"✅ 自动{action} {symbol} @ {price} (信号:{signal_type}, 杠杆:{leverage}x)")
-                return result   # 一次只开一单
-
+                return result
     st.toast(f"🤖 未找到评分 ≥ {min_score} 的币种")
     return result
