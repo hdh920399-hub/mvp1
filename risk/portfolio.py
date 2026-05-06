@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+import numpy as np
 
 STATE_FILE = "trader_state.json"
 
@@ -95,59 +96,69 @@ class SimulatedTrader:
         closed = []
         for symbol, pos in list(self.holdings.items()):
             price = current_prices.get(symbol)
-            if not price:
+            if price is None:
                 continue
+            pnl = 0
+            reason = ""
             if pos["side"] == "LONG":
-                if price <= pos["stop_loss"] or price >= pos["take_profit"]:
+                if price <= pos["stop_loss"]:
                     pnl = (price - pos["avg_price"]) * pos["quantity"]
-                    reason = "stop_loss" if price <= pos["stop_loss"] else "take_profit"
-                    # 平仓逻辑
-                    margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
-                    self.balance += margin_used + pnl
-                    self.trades.append({
-                        "timestamp": datetime.now(),
-                        "symbol": symbol,
-                        "action": "CLOSE",
-                        "entry_price": pos["avg_price"],
-                        "exit_price": price,
-                        "quantity": pos["quantity"],
-                        "pnl": pnl,
-                        "reason": reason
-                    })
-                    del self.holdings[symbol]
-                    closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
-            else:  # SHORT
-                if price >= pos["stop_loss"] or price <= pos["take_profit"]:
+                    reason = "stop_loss"
+                elif price >= pos["take_profit"]:
+                    pnl = (price - pos["avg_price"]) * pos["quantity"]
+                    reason = "take_profit"
+            else:
+                if price >= pos["stop_loss"]:
                     pnl = (pos["avg_price"] - price) * pos["quantity"]
-                    reason = "stop_loss" if price >= pos["stop_loss"] else "take_profit"
-                    margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
-                    self.balance += margin_used + pnl
-                    self.trades.append({
-                        "timestamp": datetime.now(),
-                        "symbol": symbol,
-                        "action": "CLOSE",
-                        "entry_price": pos["avg_price"],
-                        "exit_price": price,
-                        "quantity": pos["quantity"],
-                        "pnl": pnl,
-                        "reason": reason
-                    })
-                    del self.holdings[symbol]
-                    closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
+                    reason = "stop_loss"
+                elif price <= pos["take_profit"]:
+                    pnl = (pos["avg_price"] - price) * pos["quantity"]
+                    reason = "take_profit"
+            if reason:
+                margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
+                self.balance += margin_used + pnl
+                self.trades.append({
+                    "timestamp": datetime.now(),
+                    "symbol": symbol,
+                    "action": "CLOSE",
+                    "entry_price": pos["avg_price"],
+                    "exit_price": price,
+                    "quantity": pos["quantity"],
+                    "pnl": pnl,
+                    "reason": reason
+                })
+                del self.holdings[symbol]
+                closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
         if closed:
             self.save_state()
         return closed
 
-    def get_performance(self):
+    def get_total_asset(self, current_prices=None):
+        """计算总资产 = 可用余额 + 持仓市值"""
+        if current_prices is None:
+            current_prices = {}
+        holdings_value = 0.0
+        for symbol, pos in self.holdings.items():
+            price = current_prices.get(symbol, pos["avg_price"])
+            if pos["side"] == "LONG":
+                holdings_value += price * pos["quantity"]
+            else:  # SHORT
+                # 空头持仓市值简单按绝对值计算（实际应为保证金+浮动盈亏，这里简化）
+                holdings_value += price * pos["quantity"]
+        return self.balance + holdings_value
+
+    def get_performance(self, current_prices=None):
         closed = [t for t in self.trades if t["action"] == "CLOSE"]
-        total_pnl = sum(t.get("pnl", 0) for t in closed)
+        realized_pnl = sum(t.get("pnl", 0) for t in closed)
         win_rate = len([t for t in closed if t.get("pnl", 0) > 0]) / max(1, len(closed)) * 100
+        total_asset = self.get_total_asset(current_prices)
         return {
             "初始本金": self.initial_balance,
-            "当前本金": round(self.balance, 2),
-            "总盈亏": round(self.balance - self.initial_balance, 2),
-            "收益率": round((self.balance - self.initial_balance) / self.initial_balance * 100, 2),
-            "交易次数": len(closed),
+            "总资产": round(total_asset, 2),
+            "可用余额": round(self.balance, 2),
+            "已实现盈亏": round(realized_pnl, 2),
+            "收益率": round((total_asset - self.initial_balance) / self.initial_balance * 100, 2),
+            "平仓次数": len(closed),
             "胜率": round(win_rate, 1),
-            "最大回撤": 0
+            "持仓数量": len(self.holdings)
         }
