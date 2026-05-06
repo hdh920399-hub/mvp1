@@ -19,8 +19,7 @@ from analysis.backtest_exporter import BacktestExporter
 from scanner.multi import scan_cheap_coins_with_signal
 from ui.chart import create_pro_chart
 
-# 设置时区
-tz = pytz.timezone('Asia/Shanghai')
+
 def now_cn():
     return datetime.now(tz)
 
