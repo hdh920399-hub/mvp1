@@ -11,19 +11,22 @@ def create_pro_chart(df, symbol):
         row_heights=[0.6, 0.2, 0.2],
         subplot_titles=(f"{symbol} K线图", "成交量", "RSI")
     )
-    # 第1行: 蜡烛图 + 均线
+    # 蜡烛图
     fig.add_trace(go.Candlestick(
         x=df["time"], open=df["open"], high=df["high"],
         low=df["low"], close=df["close"], name="K线"
     ), row=1, col=1)
+    # 均线
     if len(df) >= 20:
         df["MA20"] = df["close"].rolling(20).mean()
+        fig.add_trace(go.Scatter(x=df["time"], y=df["MA20"], mode="lines", name="MA20", line=dict(color="orange")), row=1, col=1)
     if len(df) >= 50:
         df["MA50"] = df["close"].rolling(50).mean()
-    # 第2行: 成交量
+        fig.add_trace(go.Scatter(x=df["time"], y=df["MA50"], mode="lines", name="MA50", line=dict(color="blue")), row=1, col=1)
+    # 成交量
     colors = ["red" if df["close"].iloc[i] < df["open"].iloc[i] else "green" for i in range(len(df))]
-    fig.add_trace(go.Bar(x=df["time"], y=df["volume"], name="成交量", marker_color=colors), row=2, col=1)
-    # 第3行: RSI
+    fig.add_trace(go.Bar(x=df["time"], y=df["volume"], name="成交量", marker_color=colors, showlegend=False), row=2, col=1)
+    # RSI
     delta = df["close"].diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
