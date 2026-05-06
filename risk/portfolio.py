@@ -8,8 +8,8 @@ STATE_FILE = "trader_state.json"
 class SimulatedTrader:
     def __init__(self, initial_balance=100):
         self.initial_balance = initial_balance
-        self.stop_loss_pct = 0.02
-        self.take_profit_pct = 0.05
+        self.stop_loss_pct = 0.02   # 默认2%
+        self.take_profit_pct = 0.05 # 默认5%
         if not self.load_state():
             self.balance = initial_balance
             self.holdings = {}
@@ -51,17 +51,19 @@ class SimulatedTrader:
             return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
 
-    def buy(self, symbol, price, usdt_amount, leverage=1):
+    def buy(self, symbol, price, usdt_amount, leverage=1, stop_loss_pct=None, take_profit_pct=None):
         margin = usdt_amount / leverage
         if margin > self.balance:
             return False, f"余额不足"
         quantity = usdt_amount / price
+        sl_pct = stop_loss_pct if stop_loss_pct is not None else self.stop_loss_pct
+        tp_pct = take_profit_pct if take_profit_pct is not None else self.take_profit_pct
         self.holdings[symbol] = {
             "quantity": quantity,
             "avg_price": price,
             "side": "LONG",
-            "stop_loss": price * (1 - self.stop_loss_pct),
-            "take_profit": price * (1 + self.take_profit_pct),
+            "stop_loss": price * (1 - sl_pct),
+            "take_profit": price * (1 + tp_pct),
             "leverage": leverage
         }
         self.balance -= margin
@@ -77,17 +79,19 @@ class SimulatedTrader:
         self.save_state()
         return True, f"买入 {quantity:.4f}"
 
-    def short(self, symbol, price, usdt_amount, leverage=1):
+    def short(self, symbol, price, usdt_amount, leverage=1, stop_loss_pct=None, take_profit_pct=None):
         margin = usdt_amount / leverage
         if margin > self.balance:
             return False, f"余额不足"
         quantity = usdt_amount / price
+        sl_pct = stop_loss_pct if stop_loss_pct is not None else self.stop_loss_pct
+        tp_pct = take_profit_pct if take_profit_pct is not None else self.take_profit_pct
         self.holdings[symbol] = {
             "quantity": quantity,
             "avg_price": price,
             "side": "SHORT",
-            "stop_loss": price * (1 + self.stop_loss_pct),
-            "take_profit": price * (1 - self.take_profit_pct),
+            "stop_loss": price * (1 + sl_pct),
+            "take_profit": price * (1 - tp_pct),
             "leverage": leverage
         }
         self.balance -= margin
@@ -151,7 +155,6 @@ class SimulatedTrader:
         holdings_value = 0.0
         for symbol, pos in self.holdings.items():
             price = current_prices.get(symbol, pos["avg_price"])
-            # 逐仓模式：多头和空头持仓市值均按绝对值计算（可用保证金 + 浮动盈亏）
             holdings_value += abs(pos["quantity"]) * price
         return self.balance + holdings_value
 
