@@ -4,15 +4,13 @@ from datetime import datetime
 
 class AdaptiveLearner:
     def __init__(self, max_history=30):
-        self.trade_history = deque(maxlen=max_history)  # 存储最近 max_history 笔平仓交易
-        self.parameter_history = deque(maxlen=10)       # 记录参数调整历史
+        self.trade_history = deque(maxlen=max_history)
+        self.parameter_history = deque(maxlen=10)
 
     def record_trade(self, trade):
-        """记录一笔已平仓交易（应在每次平仓时调用）"""
         self.trade_history.append(trade)
 
     def get_recent_performance(self, lookback=20):
-        """计算近期胜率和平均盈亏"""
         recent = list(self.trade_history)[-lookback:]
         if not recent:
             return {"win_rate": 0, "avg_pnl": 0, "sharpe": 0}
@@ -24,19 +22,21 @@ class AdaptiveLearner:
         return {"win_rate": win_rate, "avg_pnl": avg_pnl, "sharpe": sharpe}
 
     def adapt_params(self, current_params):
-        """根据近期交易表现调整参数"""
+        """current_params 应包含：min_score, risk_pct, stop_loss_pct, take_profit_pct（均为百分比数值）"""
         perf = self.get_recent_performance(lookback=10)
         new_params = current_params.copy()
         reason = ""
-        # 如果胜率低于40%，提高开仓最低评分，降低单笔风险
         if perf["win_rate"] < 40:
             new_params["min_score"] = min(80, current_params.get("min_score", 60) + 5)
             new_params["risk_pct"] = max(5, current_params.get("risk_pct", 10) - 1)
+            new_params["stop_loss_pct"] = max(1, current_params.get("stop_loss_pct", 2) - 0.5)
+            new_params["take_profit_pct"] = max(2, current_params.get("take_profit_pct", 5) - 0.5)
             reason = f"胜率{perf['win_rate']:.1f}%偏低，提高开仓评分至{new_params['min_score']}，降低风险至{new_params['risk_pct']}%"
-        # 如果胜率高于70%，可适当降低评分门槛，略微提高风险
         elif perf["win_rate"] > 70:
             new_params["min_score"] = max(30, current_params.get("min_score", 60) - 5)
             new_params["risk_pct"] = min(20, current_params.get("risk_pct", 10) + 1)
+            new_params["stop_loss_pct"] = min(5, current_params.get("stop_loss_pct", 2) + 0.5)
+            new_params["take_profit_pct"] = min(10, current_params.get("take_profit_pct", 5) + 0.5)
             reason = f"胜率{perf['win_rate']:.1f}%较高，降低开仓评分至{new_params['min_score']}，提高风险至{new_params['risk_pct']}%"
         else:
             reason = f"胜率{perf['win_rate']:.1f}%正常，无需调整"
