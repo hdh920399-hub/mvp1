@@ -16,7 +16,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             raise Exception(f"API状态码异常: {resp.status_code}")
         data = resp.json()
     except Exception as e:
-        # 真实数据获取失败，直接抛出异常（不生成模拟数据）
         raise Exception(f"无法获取币安24h行情数据: {e}")
 
     # 2. 筛选低价币（价格 ≤ max_price，成交量 > 50000 USDT）
@@ -37,19 +36,16 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 "low": float(item["lowPrice"])
             })
     if not cheap:
-        # 无满足条件的币种，返回空 DataFrame（界面会提示用户调高价格上限）
         return pd.DataFrame(), 0
 
     cheap.sort(key=lambda x: x["volume"], reverse=True)
 
-    # 3. 为每个币种计算详细分析（需要 K 线数据）
     results = []
     for coin in cheap[offset:offset+limit]:
         symbol = coin["symbol"]
         try:
             df = get_klines(symbol, "1h", limit=60)
             if df is None or len(df) < 30:
-                # K线数据不足，跳过该币种（不计入结果）
                 print(f"跳过 {symbol}: K线数据不足")
                 continue
 
@@ -72,27 +68,27 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             atr = tr.rolling(14).mean().iloc[-1]
             price_now = coin["price"]
 
-            # ---------- 基础评分与信号 ----------
+            # ---------- 基础评分与信号（多空导向名称）----------
             if rsi < 30:
                 score = 80
-                signal = "🟢超卖"
-                base = f"RSI={rsi}（超卖区），价格可能反弹。"
+                signal = "🟢 强烈做多"
+                base = f"RSI={rsi}（超卖区），价格可能反弹，适合做多。"
             elif rsi < 45:
                 score = 65
-                signal = "🟢偏多"
-                base = f"RSI={rsi}（偏低），有上涨潜力。"
+                signal = "🟢 做多"
+                base = f"RSI={rsi}（偏低），有上涨潜力，可考虑做多。"
             elif rsi > 70:
                 score = 20
-                signal = "🔴超买"
-                base = f"RSI={rsi}（超买区），回调风险增大。"
+                signal = "🔴 强烈做空"
+                base = f"RSI={rsi}（超买区），回调风险增大，适合做空。"
             elif rsi > 55:
                 score = 35
-                signal = "🔴偏空"
-                base = f"RSI={rsi}（偏高），可能面临压力。"
+                signal = "🔴 做空"
+                base = f"RSI={rsi}（偏高），可能面临压力，可考虑做空。"
             else:
                 score = 50
-                signal = "⚪中性"
-                base = f"RSI={rsi}（中性区间）。"
+                signal = "⚪ 观望"
+                base = f"RSI={rsi}（中性区间），等待更明确信号。"
 
             # ---------- 均线描述 ----------
             ma20 = close.rolling(20).mean().iloc[-1]
@@ -124,7 +120,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 chg_desc = "24h波动温和。"
 
             # ---------- 动态杠杆计算（1-20倍）----------
-            # 计算 ADX（14周期趋势强度）
             def calc_adx(df, period=14):
                 high, low, close = df["high"], df["low"], df["close"]
                 plus_dm = high.diff()
@@ -140,12 +135,11 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 return adx if not pd.isna(adx) else 20
 
             adx = calc_adx(df, period=14)
-
             volatility_pct = atr / price_now * 100
             base_leverage = 20
             volatility_factor = max(0.2, min(1.0, 3.0 / (volatility_pct + 0.5)))
             adx_factor = min(1.5, max(0.5, adx / 40))
-            score_factor = 0.8 + (score - 50) / 100   # 评分50对应0.8，100对应1.3
+            score_factor = 0.8 + (score - 50) / 100
             rsi_penalty = 0.7 if (rsi > 80 or rsi < 20) else 1.0
 
             leverage = base_leverage * volatility_factor * adx_factor * score_factor * rsi_penalty
@@ -190,7 +184,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             })
         except Exception as e:
             print(f"处理 {symbol} 时出错: {e}")
-            # 跳过该币种，不添加到结果中
             continue
 
     if not results:
