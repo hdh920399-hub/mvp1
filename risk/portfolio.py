@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 from data.binance import get_current_funding_rate
 
@@ -52,30 +52,6 @@ class SimulatedTrader:
             return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
 
-    def _calc_funding_cost(self, pos, exit_time):
-        """计算从开仓到平仓期间应支付/收取的资金费用（行业标准）"""
-        if "last_funding_check" not in pos:
-            # 第一次计算，使用开仓时间
-            start = pos["open_time"]
-        else:
-            start = pos["last_funding_check"]
-        # 币安资金费率每8小时结算一次，我们简化：按小时线性计算
-        hours = (exit_time - start).total_seconds() / 3600
-        if hours <= 0:
-            return 0
-        # 获取当前最新资金费率（假设整个期间费率不变，实际应多次查询，这里简化）
-        fr_info = get_current_funding_rate(pos["symbol"])
-        if fr_info is None:
-            return 0
-        funding_rate = fr_info["funding_rate"]
-        notional = pos["notional"]
-        # 多头支付（费率为正时支付），空头收取
-        if pos["side"] == "LONG":
-            cost = notional * funding_rate * hours
-        else:
-            cost = -notional * funding_rate * hours
-        return cost
-
     def buy(self, symbol, price, usdt_amount, leverage=1, stop_loss_pct=None, take_profit_pct=None):
         margin = usdt_amount / leverage
         if margin > self.balance:
@@ -93,8 +69,7 @@ class SimulatedTrader:
             "leverage": leverage,
             "margin": margin,
             "notional": usdt_amount,
-            "open_time": datetime.now(),
-            "last_funding_check": datetime.now()
+            "open_time": datetime.now()
         }
         self.balance -= margin
         self.trades.append({
@@ -128,8 +103,7 @@ class SimulatedTrader:
             "leverage": leverage,
             "margin": margin,
             "notional": usdt_amount,
-            "open_time": datetime.now(),
-            "last_funding_check": datetime.now()
+            "open_time": datetime.now()
         }
         self.balance -= margin
         self.trades.append({
@@ -146,17 +120,41 @@ class SimulatedTrader:
         self.save_state()
         return True, f"做空 {quantity:.4f}"
 
+    def _calc_funding_cost(self, pos, exit_time):
+        try:
+            fr_info = get_current_funding_rate(pos["symbol"])
+            if fr_info is None:
+                return 0
+            funding_rate = fr_info["funding_rate"]
+            # 计算持仓时长（小时）
+            start = pos.get("last_funding_check", pos["open_time"])
+            hours = (exit_time - start).total_seconds() / 3600
+            if hours <= 0:
+                return 0
+            notional = pos["notional"]
+            if pos["side"] == "LONG":
+                cost = notional * funding_rate * hours
+            else:
+                cost = -notional * funding_rate * hours
+            return cost
+        except:
+            return 0
+
     def _close_position(self, symbol, current_price, reason):
         pos = self.holdings[symbol]
-        # 计算平仓盈亏
+        # 价格盈亏
         if pos["side"] == "LONG":
-            pnl = (current_price - pos["avg_price"]) * pos["quantity"]
+            price_pnl = (current_price - pos["avg_price"]) * pos["quantity"]
         else:
-            pnl = (pos["avg_price"] - current_price) * pos["quantity"]
-        # 计算资金费率成本（行业标准）
+            price_pnl = (pos["avg_price"] - current_price) * pos["quantity"]
+        # 资金费用
         funding_cost = self._calc_funding_cost(pos, datetime.now())
-        # 总盈亏 = 价格盈亏 - 资金费用（多头支付，空头收取）
-        total_pnl = pnl - funding_cost if pos["side"] == "LONG" else pnl + funding_cost
+        # 总盈亏 = 价格盈亏 - 资金费用（多头支付，空头收取？注意符号）
+        # 根据行业标准：多头：总盈亏 = 价格盈亏 - 资金费用；空头：总盈亏 = 价格盈亏 + 资金费用
+        if pos["side"] == "LONG":
+            total_pnl = price_pnl - funding_cost
+        else:
+            total_pnl = price_pnl + funding_cost
         margin_used = pos["margin"]
         self.balance += margin_used + total_pnl
         self.trades.append({
@@ -169,7 +167,7 @@ class SimulatedTrader:
             "margin": margin_used,
             "notional": pos["notional"],
             "leverage": pos["leverage"],
-            "pnl": total_pnl,          # 已包含资金费率
+            "pnl": total_pnl,
             "funding_cost": funding_cost,
             "reason": reason
         })
@@ -203,7 +201,7 @@ class SimulatedTrader:
         if symbol not in self.holdings:
             return False, 0, "无此持仓"
         pnl = self._close_position(symbol, current_price, "manual_close")
-        return True, pnl, f"平仓成功，盈亏 {pnl:+.2f} U"
+        return True, pnl, f"强制平仓成功，盈亏 {pnl:+.2f} U"
 
     def force_close_all_positions(self, current_prices):
         closed = []
@@ -217,7 +215,6 @@ class SimulatedTrader:
         return closed
 
     def get_total_asset(self, current_prices=None):
-        """总资产 = 可用余额 + 所有持仓的浮动盈亏总和（不含资金费率，因为未结算）"""
         if current_prices is None:
             current_prices = {}
         total_unrealized = 0.0
@@ -232,7 +229,7 @@ class SimulatedTrader:
 
     def get_performance(self, current_prices=None):
         closed = [t for t in self.trades if t["action"] == "CLOSE"]
-        realized_pnl = sum(t.get("pnl", 0) for t in closed)   # 已包含资金费率
+        realized_pnl = sum(t.get("pnl", 0) for t in closed)
         win_rate = len([t for t in closed if t.get("pnl", 0) > 0]) / max(1, len(closed)) * 100
         total_asset = self.get_total_asset(current_prices)
         return_percent = (realized_pnl / self.initial_balance) * 100
