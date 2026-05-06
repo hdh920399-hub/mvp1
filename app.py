@@ -131,6 +131,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption(f"⏱️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+# 排行榜
 st.subheader("🏆 低价潜力币排行榜")
 col_btn1, col_btn2, col_btn3, col_refresh = st.columns(4)
 with col_btn1:
@@ -151,6 +152,14 @@ with col_refresh:
         st.rerun()
 
 ranking_df, total_count = load_ranking_cached(max_price, st.session_state.ranking_limit)
+
+# 确保 AI分析 列不为空
+if not ranking_df.empty:
+    if "AI分析" in ranking_df.columns:
+        ranking_df["AI分析"] = ranking_df["AI分析"].fillna("暂无详细分析")
+    else:
+        ranking_df["AI分析"] = "暂无详细分析"
+
 if not ranking_df.empty:
     def highlight_score(val):
         if isinstance(val, (int, float)):
@@ -163,8 +172,6 @@ if not ranking_df.empty:
             return 'background-color: #c62828; color: white'
         return ''
 
-    if "AI分析" not in ranking_df.columns:
-        ranking_df["AI分析"] = "暂无"
     display_cols = ["币种", "价格", "24h涨跌", "24h量(百万U)", "RSI", "AI信号", "评分", "AI分析"]
     available_cols = [c for c in display_cols if c in ranking_df.columns]
     styled = ranking_df[available_cols].style.map(highlight_score, subset=['评分'])
@@ -175,6 +182,7 @@ else:
 
 st.markdown("---")
 
+# K线分析
 st.subheader("📈 专业K线分析")
 col_select, col_custom = st.columns([3, 1])
 with col_select:
@@ -233,6 +241,7 @@ with col_right:
     else:
         st.info("等待数据...")
 
+# 账户表现
 st.markdown("---")
 perf = st.session_state.trader.get_performance()
 col_a, col_b, col_c, col_d = st.columns(4)
@@ -240,6 +249,7 @@ col_a.metric("当前本金", f"{perf['当前本金']} U")
 col_b.metric("总盈亏", f"{perf['总盈亏']:+.2f} U")
 col_c.metric("收益率", f"{perf['收益率']}%")
 col_d.metric("交易次数", perf["交易次数"])
+
 if st.button("📥 导出回测报告"):
     trades_csv = BacktestExporter.export_trades_to_csv(st.session_state.trader.trades)
     perf_csv = BacktestExporter.export_performance_to_csv(perf)
@@ -247,18 +257,32 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
+# 交易明细（含浮动盈亏）
 with st.expander("📊 详细交易盈亏明细", expanded=False):
     if st.session_state.trader.holdings:
         st.subheader("📌 当前持仓 (未平仓)")
+        current_prices = {}
+        if df is not None:
+            current_prices[selected_symbol] = df["close"].iloc[-1]
         holdings_data = []
         for sym, pos in st.session_state.trader.holdings.items():
+            current_price = current_prices.get(sym, pos["avg_price"])
+            if pos["side"] == "LONG":
+                unrealized_pnl = (current_price - pos["avg_price"]) * pos["quantity"]
+                unrealized_pnl_pct = (current_price / pos["avg_price"] - 1) * 100
+            else:
+                unrealized_pnl = (pos["avg_price"] - current_price) * pos["quantity"]
+                unrealized_pnl_pct = (1 - current_price / pos["avg_price"]) * 100
             holdings_data.append({
                 "币种": sym,
                 "方向": pos["side"],
-                "开仓价": pos["avg_price"],
+                "开仓价": round(pos["avg_price"], 6),
+                "当前价": round(current_price, 6),
                 "数量": pos["quantity"],
-                "止损价": pos["stop_loss"],
-                "止盈价": pos["take_profit"],
+                "浮动盈亏(USDT)": round(unrealized_pnl, 2),
+                "盈亏%": f"{unrealized_pnl_pct:+.2f}%",
+                "止损价": round(pos["stop_loss"], 6),
+                "止盈价": round(pos["take_profit"], 6),
                 "杠杆": pos.get("leverage", 1)
             })
         st.dataframe(pd.DataFrame(holdings_data), use_container_width=True)
@@ -278,6 +302,7 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
     else:
         st.info("暂无任何交易记录")
 
+# 深度优化引擎
 st.markdown("---")
 with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
     tab1, tab2, tab3, tab4 = st.tabs(["📊 市场状态", "⚙️ 策略参数", "🧬 优化器", "🧠 自适应学习"])
@@ -329,11 +354,13 @@ with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
             else:
                 st.info(reason)
 
+# 每日总结（传入 df）
 with st.expander("📋 每日总结报告", expanded=False):
     if st.button("生成今日报告", key="gen_report"):
-        summarizer = DailySummarizer(st.session_state.trader)
+        summarizer = DailySummarizer(st.session_state.trader, df=df)
         st.markdown(summarizer.generate())
 
+# 实时风控事件
 with st.expander("🚨 实时风控事件", expanded=False):
     if st.button("刷新持仓检查", key="refresh_positions"):
         if df is not None:
@@ -344,6 +371,7 @@ with st.expander("🚨 实时风控事件", expanded=False):
             else:
                 st.info("无平仓事件")
 
+# 自动刷新逻辑
 if st.session_state.get("auto_refresh", False):
     time.sleep(30)
     st.cache_data.clear()
