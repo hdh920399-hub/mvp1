@@ -20,17 +20,17 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=2
         score = row["评分"]
         price = row["价格"]
         signal_type = row.get("AI信号", "")
-        leverage = row.get("建议杠杆", 1)   # 使用 AI 建议杠杆，默认1
+        leverage = row.get("建议杠杆", 1)
 
         if symbol in trader.holdings:
             continue
 
         if score >= min_score:
             usdt_amount = max(5, trader.balance * risk_pct)
-            if "超卖" in signal_type or "偏多" in signal_type or score >= 70:
+            if "做多" in signal_type:
                 success, msg = trader.buy(symbol, price, usdt_amount, leverage=leverage)
                 action = "BUY"
-            elif "超买" in signal_type or "偏空" in signal_type:
+            elif "做空" in signal_type:
                 success, msg = trader.short(symbol, price, usdt_amount, leverage=leverage)
                 action = "SHORT"
             else:
@@ -43,7 +43,8 @@ def auto_trade(trader, max_price=1.0, max_positions=3, risk_pct=0.1, min_score=2
                     "price": price,
                     "leverage": leverage
                 })
-                st.toast(f"✅ 自动{action} {symbol} @ {price} (评分:{score}, 杠杆:{leverage}x)")
+                st.toast(f"✅ 自动{action} {symbol} @ {price} (信号:{signal_type}, 杠杆:{leverage}x)")
                 return result
+
     st.toast(f"未找到评分 ≥ {min_score} 的币种")
     return result
