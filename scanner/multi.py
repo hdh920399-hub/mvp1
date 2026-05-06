@@ -5,7 +5,7 @@ from data.binance import get_klines
 FUTURES_BASE_URL = "https://fapi.binance.com"
 
 def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
-    # 1. 获取 24h 行情数据
+    # 1. 获取24h行情数据
     try:
         resp = requests.get(
             f"{FUTURES_BASE_URL}/fapi/v1/ticker/24hr",
@@ -18,7 +18,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
     except Exception as e:
         raise Exception(f"无法获取币安24h行情数据: {e}")
 
-    # 2. 筛选低价币（价格 ≤ max_price，成交量 > 50000 USDT）
+    # 2. 筛选低价币
     cheap = []
     for item in data:
         sym = item["symbol"]
@@ -53,7 +53,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             high = df["high"]
             low = df["low"]
 
-            # ---------- RSI ----------
+            # RSI
             delta = close.diff()
             gain = delta.where(delta > 0, 0)
             loss = -delta.where(delta < 0, 0)
@@ -63,12 +63,12 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
             rsi = round(rsi_val, 1)
 
-            # ---------- ATR ----------
+            # ATR
             tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
             atr = tr.rolling(14).mean().iloc[-1]
             price_now = coin["price"]
 
-            # ---------- 基础评分与信号（多空导向名称）----------
+            # 评分与信号名称（多空导向）
             if rsi < 30:
                 score = 80
                 signal = "🟢 强烈做多"
@@ -90,7 +90,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
                 signal = "⚪ 观望"
                 base = f"RSI={rsi}（中性区间），等待更明确信号。"
 
-            # ---------- 均线描述 ----------
+            # 均线描述
             ma20 = close.rolling(20).mean().iloc[-1]
             ma50 = close.rolling(50).mean().iloc[-1] if len(df) >= 50 else ma20
             if price_now > ma20 and price_now > ma50:
@@ -100,7 +100,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             else:
                 ma_desc = "价格介于均线之间，趋势不明朗。"
 
-            # ---------- 成交量分析 ----------
+            # 成交量分析
             avg_vol = df["volume"].rolling(20).mean().iloc[-1]
             vol_ratio = df["volume"].iloc[-1] / avg_vol if avg_vol != 0 else 1
             if vol_ratio > 1.5:
@@ -110,7 +110,6 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             else:
                 vol_desc = "成交量正常或萎缩，动能不足。"
 
-            # ---------- 24h涨跌描述 ----------
             chg = coin["change"]
             if chg > 10:
                 chg_desc = "24h涨幅较大，注意追高风险。"
@@ -119,7 +118,7 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             else:
                 chg_desc = "24h波动温和。"
 
-            # ---------- 动态杠杆计算（1-20倍）----------
+            # 动态杠杆计算（1-20倍）
             def calc_adx(df, period=14):
                 high, low, close = df["high"], df["low"], df["close"]
                 plus_dm = high.diff()
@@ -145,22 +144,22 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             leverage = base_leverage * volatility_factor * adx_factor * score_factor * rsi_penalty
             leverage = max(1, min(20, round(leverage)))
 
-            # ---------- 交易策略建议 ----------
+            # 交易策略建议
             if score >= 70:
                 direction = "做多"
                 entry = price_now
                 stop_loss = entry - 2 * atr
                 take_profit = entry + 3 * atr
-                risk_pct = (entry - stop_loss) / entry * 100
-                position_pct = min(0.2, 0.02 / (risk_pct / 100)) if risk_pct > 0 else 0.1
+                risk_pct_calc = (entry - stop_loss) / entry * 100
+                position_pct = min(0.2, 0.02 / (risk_pct_calc / 100)) if risk_pct_calc > 0 else 0.1
                 trade_advice = f"【交易策略】{direction} 入场 {entry:.4f}，止损 {stop_loss:.4f}，止盈 {take_profit:.4f}，建议仓位 {position_pct*100:.1f}%，杠杆 {leverage}x。"
             elif score <= 20:
                 direction = "做空"
                 entry = price_now
                 stop_loss = entry + 2 * atr
                 take_profit = entry - 3 * atr
-                risk_pct = (stop_loss - entry) / entry * 100
-                position_pct = min(0.2, 0.02 / (risk_pct / 100)) if risk_pct > 0 else 0.1
+                risk_pct_calc = (stop_loss - entry) / entry * 100
+                position_pct = min(0.2, 0.02 / (risk_pct_calc / 100)) if risk_pct_calc > 0 else 0.1
                 trade_advice = f"【交易策略】{direction} 入场 {entry:.4f}，止损 {stop_loss:.4f}，止盈 {take_profit:.4f}，建议仓位 {position_pct*100:.1f}%，杠杆 {leverage}x。"
             else:
                 trade_advice = "【交易策略】信号中性，建议观望。"
