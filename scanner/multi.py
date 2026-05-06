@@ -6,7 +6,7 @@ from data.binance import get_klines
 FUTURES_BASE_URL = "https://fapi.binance.com"
 
 def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
-    """扫描低价币种，使用多因子评分引擎"""
+    """扫描低价币种，使用多因子评分引擎，并生成具体交易策略"""
     # 获取24h行情数据
     try:
         resp = requests.get(f"{FUTURES_BASE_URL}/fapi/v1/ticker/24hr", 
@@ -53,42 +53,40 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             scorer = MultiFactorScorer(df, price_now, symbol, volume_series, coin["change"])
             score_result = scorer.calculate_total_score()
 
-            # 获取 ATR（14周期平均真实波幅）
+            # ---- 生成具体交易策略 ----
             _, atr = scorer.calculate_adx()
-            price_now = coin["price"]
+            if score_result["direction"] == "LONG":
+                direction = "做多"
+                entry = price_now
+                stop_loss = entry - 2 * atr
+                take_profit = entry + 3 * atr
+                risk_pct_calc = (entry - stop_loss) / entry * 100
+                position_pct = min(0.2, 0.02 / (risk_pct_calc / 100)) if risk_pct_calc > 0 else 0.1
+                trade_advice = f"【交易策略】{direction} 入场 {entry:.6f}，止损 {stop_loss:.6f}，止盈 {take_profit:.6f}，建议仓位 {position_pct*100:.1f}%，杠杆 {score_result['leverage']}x。"
+            elif score_result["direction"] == "SHORT":
+                direction = "做空"
+                entry = price_now
+                stop_loss = entry + 2 * atr
+                take_profit = entry - 3 * atr
+                risk_pct_calc = (stop_loss - entry) / entry * 100
+                position_pct = min(0.2, 0.02 / (risk_pct_calc / 100)) if risk_pct_calc > 0 else 0.1
+                trade_advice = f"【交易策略】{direction} 入场 {entry:.6f}，止损 {stop_loss:.6f}，止盈 {take_profit:.6f}，建议仓位 {position_pct*100:.1f}%，杠杆 {score_result['leverage']}x。"
+            else:
+                trade_advice = "【交易策略】信号中性，建议观望。"
 
-            # 根据评分方向确定做多还是做空
-    if score_result["direction"] == "LONG":
-        direction = "做多"
-        entry = price_now
-        stop_loss = entry - 2 * atr
-        take_profit = entry + 3 * atr
-        risk_pct = (entry - stop_loss) / entry * 100
-        position_pct = min(0.2, 0.02 / (risk_pct / 100)) if risk_pct > 0 else 0.1
-        trade_advice = f"【交易策略】{direction} 入场 {entry:.6f}，止损 {stop_loss:.6f}，止盈 {take_profit:.6f}，建议仓位 {position_pct*100:.1f}%，杠杆 {score_result['leverage']}x。"
-    elif score_result["direction"] == "SHORT":
-        direction = "做空"
-        entry = price_now
-        stop_loss = entry + 2 * atr
-        take_profit = entry - 3 * atr
-        risk_pct = (stop_loss - entry) / entry * 100
-        position_pct = min(0.2, 0.02 / (risk_pct / 100)) if risk_pct > 0 else 0.1
-        trade_advice = f"【交易策略】{direction} 入场 {entry:.6f}，止损 {stop_loss:.6f}，止盈 {take_profit:.6f}，建议仓位 {position_pct*100:.1f}%，杠杆 {score_result['leverage']}x。"
-    else:
-        trade_advice = "【交易策略】信号中性，建议观望。"
-
-analysis = score_result["analysis"] + " " + trade_advice
+            # 合并因子分析和交易策略
+            full_analysis = score_result["analysis"] + " " + trade_advice
 
             results.append({
                 "币种": symbol.replace("USDT", ""),
                 "价格": round(price_now, 6),
                 "24h涨跌": f"{coin['change']:+.2f}%",
                 "24h量(百万U)": f"{coin['volume']/1e6:.1f}",
-                "RSI": score_result["rsi"],
+                "RSI": score_result.get("rsi", 50),
                 "AI信号": score_result["signal_text"],
                 "评分": score_result["total_score"],
                 "建议杠杆": score_result["leverage"],
-                "AI分析": score_result["analysis"]
+                "AI分析": full_analysis
             })
         except Exception as e:
             print(f"处理 {symbol} 出错: {e}")
