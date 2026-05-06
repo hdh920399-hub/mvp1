@@ -143,6 +143,11 @@ with col_refresh:
         st.rerun()
 
 ranking_df, total_count = load_ranking_cached(max_price, st.session_state.ranking_limit)
+ranking_df, total_count = load_ranking_cached(max_price, st.session_state.ranking_limit)
+if ranking_df.empty:
+    st.error(f"❌ 未获取到真实数据，请检查币安 API 或筛选条件。\n当前 max_price={max_price}，成交量阈值=50000 USDT。")
+else:
+    st.success(f"✅ 成功获取 {len(ranking_df)} 个币种的真实数据，符合条件的总数为 {total_count}")
 if not ranking_df.empty:
     def highlight_score(val):
         if isinstance(val, (int, float)):
