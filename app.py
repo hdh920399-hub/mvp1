@@ -170,9 +170,10 @@ with st.sidebar:
                 for trade in result["trades"]:
                     st.toast(f"🤖 {trade['action']} {trade['symbol']} @ {trade['price']:.6f} (杠杆:{trade['leverage']}x)")
 
-    # 手动平仓所有持仓按钮
-    if st.button("🔒 手动平仓所有持仓", use_container_width=True):
+    # 强制平仓所有持仓按钮（取代原手动平仓）
+    if st.button("🔒 强制平仓所有持仓", use_container_width=True):
         if st.session_state.trader.holdings:
+            # 获取所有持仓币种的当前价格
             closing_prices = {}
             for sym in st.session_state.trader.holdings.keys():
                 price = None
@@ -187,7 +188,7 @@ with st.sidebar:
                 if price:
                     closing_prices[sym] = price
             if closing_prices:
-                closed = st.session_state.trader.update_positions(closing_prices)
+                closed = st.session_state.trader.force_close_all_positions(closing_prices)
                 if closed:
                     for c in closed:
                         st.session_state.adaptive_learner.record_trade({
@@ -196,36 +197,13 @@ with st.sidebar:
                             "timestamp": now_cn()
                         })
                     save_trader_state()
-                    st.toast(f"已平仓 {len(closed)} 个仓位")
+                    st.toast(f"已强制平仓 {len(closed)} 个仓位")
                 else:
                     st.toast("无平仓发生")
             else:
                 st.toast("无法获取当前价格，平仓失败")
         else:
             st.toast("当前无持仓")
-
-    # 刷新当前仓位价格按钮（侧边栏）
-    if st.button("🔄 刷新当前仓位价格", use_container_width=True):
-        new_prices = {}
-        for sym in st.session_state.trader.holdings.keys():
-            price = None
-            if 'ranking_df' in locals() and not ranking_df.empty:
-                row = ranking_df[ranking_df["币种"] + "USDT" == sym]
-                if not row.empty:
-                    price = row.iloc[0]["价格"]
-            if price is None:
-                last_k = get_klines_cached(sym, "1h", limit=1)
-                if last_k is not None and len(last_k) > 0:
-                    price = last_k["close"].iloc[-1]
-            if price:
-                new_prices[sym] = price
-        if new_prices:
-            if "current_prices" not in st.session_state:
-                st.session_state.current_prices = {}
-            st.session_state.current_prices.update(new_prices)
-            st.rerun()
-        else:
-            st.toast("无法获取当前价格，请稍后重试")
 
     st.markdown("---")
     st.caption(f"⏱️ {now_cn().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -386,34 +364,8 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
-# ---------- 详细交易明细（含一键平仓按钮）----------
+# ---------- 详细交易明细（包含强制平仓按钮）----------
 with st.expander("📊 详细交易盈亏明细", expanded=False):
-    # 手动刷新持仓价格按钮
-    col_btn_refresh, _ = st.columns([1, 5])
-    with col_btn_refresh:
-        if st.button("🔄 刷新持仓价格", key="refresh_holdings_price"):
-            new_prices = {}
-            for sym in st.session_state.trader.holdings.keys():
-                price = None
-                if not ranking_df.empty:
-                    row = ranking_df[ranking_df["币种"] + "USDT" == sym]
-                    if not row.empty:
-                        price = row.iloc[0]["价格"]
-                if price is None:
-                    last_k = get_klines_cached(sym, "1h", limit=1)
-                    if last_k is not None and len(last_k) > 0:
-                        price = last_k["close"].iloc[-1]
-                if price:
-                    new_prices[sym] = price
-            if new_prices:
-                if "current_prices" not in st.session_state:
-                    st.session_state.current_prices = {}
-                st.session_state.current_prices.update(new_prices)
-                st.toast("✅ 持仓价格已刷新")
-                st.rerun()
-            else:
-                st.toast("❌ 无法获取最新价格，请稍后重试")
-
     if st.session_state.trader.holdings:
         st.subheader("📌 当前持仓 (未平仓)")
         holdings_data = []
@@ -429,7 +381,7 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                 unrealized_pnl = (pos["avg_price"] - current_price) * pos["quantity"]
                 unrealized_pnl_pct = (1 - current_price / pos["avg_price"]) * 100
             total_amount = pos["avg_price"] * pos["quantity"]
-            margin = pos.get("margin", total_amount / pos.get("leverage", 1))  # 使用存储的保证金
+            margin = pos.get("margin", total_amount / pos.get("leverage", 1))
             total_open += total_amount
             total_margin += margin
             total_unrealized += unrealized_pnl
@@ -450,8 +402,8 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
         st.dataframe(pd.DataFrame(holdings_data), use_container_width=True)
         st.write(f"**合计** | 开仓总额: {total_open:.2f} U | 占用保证金: {total_margin:.2f} U | 浮动盈亏: {total_unrealized:+.2f} U")
 
-        # 为每个持仓币种单独生成平仓按钮
-        st.subheader("🛒 一键平仓")
+        # 每个持仓币种单独生成强制平仓按钮
+        st.subheader("🛒 强制平仓")
         num_holdings = len(st.session_state.trader.holdings)
         cols_per_row = 3
         rows = (num_holdings + cols_per_row - 1) // cols_per_row
@@ -463,12 +415,11 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                     break
                 sym = list(st.session_state.trader.holdings.keys())[idx]
                 pos = st.session_state.trader.holdings[sym]
-                # 获取最新价格（优先从缓存，若无则实时获取）
                 current_price = current_prices.get(sym, pos["avg_price"])
                 with col_btns[col_idx]:
                     st.caption(f"{sym} | 当前价: {current_price:.6f}")
-                    if st.button(f"❌ 平仓 {sym}", key=f"close_single_{sym}"):
-                        # 重新获取最新价格以确保准确性
+                    if st.button(f"❌ 强制平仓 {sym}", key=f"force_close_single_{sym}"):
+                        # 重新获取最新价格
                         price = None
                         if not ranking_df.empty:
                             row = ranking_df[ranking_df["币种"] + "USDT" == sym]
@@ -481,19 +432,18 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                         if price is None:
                             st.toast(f"❌ 无法获取 {sym} 的最新价格，平仓取消")
                         else:
-                            closed = st.session_state.trader.update_positions({sym: price})
-                            if closed:
-                                for c in closed:
-                                    st.session_state.adaptive_learner.record_trade({
-                                        "symbol": c["symbol"],
-                                        "pnl": c["pnl"],
-                                        "timestamp": now_cn()
-                                    })
+                            success, pnl, msg = st.session_state.trader.force_close_position(sym, price)
+                            if success:
+                                st.session_state.adaptive_learner.record_trade({
+                                    "symbol": sym,
+                                    "pnl": pnl,
+                                    "timestamp": now_cn()
+                                })
                                 save_trader_state()
-                                st.toast(f"✅ 已平仓 {sym}，盈亏 {closed[0]['pnl']:+.2f} U")
+                                st.toast(f"✅ {msg}")
                                 st.rerun()
                             else:
-                                st.toast(f"❌ 平仓 {sym} 失败，请查看日志")
+                                st.toast(f"❌ 平仓失败: {msg}")
     else:
         st.info("📭 当前无持仓")
 
