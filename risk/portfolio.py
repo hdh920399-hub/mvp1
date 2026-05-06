@@ -150,7 +150,6 @@ class SimulatedTrader:
         return closed
 
     def get_total_asset(self, current_prices=None):
-        """正确计算总资产：可用余额 + 所有持仓的浮动盈亏总和"""
         if current_prices is None:
             current_prices = {}
         total_unrealized = 0.0
@@ -168,12 +167,14 @@ class SimulatedTrader:
         realized_pnl = sum(t.get("pnl", 0) for t in closed)
         win_rate = len([t for t in closed if t.get("pnl", 0) > 0]) / max(1, len(closed)) * 100
         total_asset = self.get_total_asset(current_prices)
+        # 收益率改为基于已实现盈亏
+        return_percent = (realized_pnl / self.initial_balance) * 100
         return {
             "初始本金": self.initial_balance,
             "总资产": round(total_asset, 2),
             "可用余额": round(self.balance, 2),
             "已实现盈亏": round(realized_pnl, 2),
-            "收益率": round((total_asset - self.initial_balance) / self.initial_balance * 100, 2),
+            "收益率": round(return_percent, 2),
             "平仓次数": len(closed),
             "胜率": round(win_rate, 1),
             "持仓数量": len(self.holdings)
