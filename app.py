@@ -171,10 +171,16 @@ if not ranking_df.empty:
                 return 'background-color: #f57c00; color: white'
             return 'background-color: #c62828; color: white'
         return ''
-    # 确保 ranking_df 包含 "AI分析" 列（如果没有，则添加空列）
-if "AI分析" not in ranking_df.columns:
-    ranking_df["AI分析"] = "暂无"
 
+    if "AI分析" not in ranking_df.columns:
+        ranking_df["AI分析"] = "暂无"
+    display_cols = ["币种", "价格", "24h涨跌", "24h量(百万U)", "RSI", "AI信号", "评分", "AI分析"]
+    available_cols = [c for c in display_cols if c in ranking_df.columns]
+    styled = ranking_df[available_cols].style.applymap(highlight_score, subset=['评分'])
+    st.dataframe(styled, use_container_width=True, height=450)
+    st.caption(f"💡 共 {total_count} 个低价币 | ≥70强烈推荐 | 55-69值得关注 | <40建议避开")
+else:
+    st.warning("暂无数据，请调高价格上限")
 # 按希望的顺序选择要显示的列
 display_cols = ["币种", "价格", "24h涨跌", "24h量(百万U)", "RSI", "AI信号", "评分", "AI分析"]
 available_cols = [c for c in display_cols if c in ranking_df.columns]
