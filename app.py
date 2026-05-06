@@ -36,7 +36,7 @@ def load_ranking_cached(max_price, limit):
         st.error(f"获取排行榜失败: {e}")
         return pd.DataFrame(), 0
 
-# 初始化 session 状态
+# ---------- session 初始化 ----------
 if "trader" not in st.session_state:
     st.session_state.trader = SimulatedTrader(100)
 if "strategy_engine" not in st.session_state:
@@ -56,7 +56,7 @@ if "auto_refresh" not in st.session_state:
 if "custom_symbol" not in st.session_state:
     st.session_state.custom_symbol = ""
 
-# 设置项默认值
+# 默认值（保证刷新后仍保留）
 st.session_state.setdefault("auto_interval", 60)
 st.session_state.setdefault("max_positions", 3)
 st.session_state.setdefault("risk_pct", 10)
@@ -67,6 +67,7 @@ st.session_state.setdefault("max_price", 1.0)
 st.title("🤖 AlphaPilot AI - 合约智能交易终端")
 st.caption("币安U本位 | 多空双向 | 低价币扫描 | 遗传/贝叶斯优化 | 自适应学习 | 自动止盈止损 | AI自动交易 | 实时刷新")
 
+# ---------- 侧边栏 ----------
 with st.sidebar:
     st.header("⚙️ 配置")
     capital = st.number_input("💰 虚拟本金", min_value=10, value=st.session_state.capital, step=10, key="capital")
@@ -131,7 +132,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption(f"⏱️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# 排行榜
+# ---------- 排行榜 ----------
 st.subheader("🏆 低价潜力币排行榜")
 col_btn1, col_btn2, col_btn3, col_refresh = st.columns(4)
 with col_btn1:
@@ -153,14 +154,12 @@ with col_refresh:
 
 ranking_df, total_count = load_ranking_cached(max_price, st.session_state.ranking_limit)
 
-# 确保 AI分析 列不为空
 if not ranking_df.empty:
     if "AI分析" in ranking_df.columns:
         ranking_df["AI分析"] = ranking_df["AI分析"].fillna("暂无详细分析")
     else:
         ranking_df["AI分析"] = "暂无详细分析"
 
-if not ranking_df.empty:
     def highlight_score(val):
         if isinstance(val, (int, float)):
             if val >= 70:
@@ -182,7 +181,7 @@ else:
 
 st.markdown("---")
 
-# K线分析
+# ---------- K线分析 ----------
 st.subheader("📈 专业K线分析")
 col_select, col_custom = st.columns([3, 1])
 with col_select:
@@ -241,7 +240,7 @@ with col_right:
     else:
         st.info("等待数据...")
 
-# 账户表现
+# ---------- 账户表现 ----------
 st.markdown("---")
 perf = st.session_state.trader.get_performance()
 col_a, col_b, col_c, col_d = st.columns(4)
@@ -257,7 +256,7 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
-# 交易明细（含浮动盈亏）
+# ---------- 详细交易盈亏明细 ----------
 with st.expander("📊 详细交易盈亏明细", expanded=False):
     if st.session_state.trader.holdings:
         st.subheader("📌 当前持仓 (未平仓)")
@@ -302,7 +301,7 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
     else:
         st.info("暂无任何交易记录")
 
-# 深度优化引擎
+# ---------- 深度优化引擎 ----------
 st.markdown("---")
 with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
     tab1, tab2, tab3, tab4 = st.tabs(["📊 市场状态", "⚙️ 策略参数", "🧬 优化器", "🧠 自适应学习"])
@@ -354,13 +353,13 @@ with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
             else:
                 st.info(reason)
 
-# 每日总结（传入 df）
+# ---------- 每日总结 ----------
 with st.expander("📋 每日总结报告", expanded=False):
     if st.button("生成今日报告", key="gen_report"):
         summarizer = DailySummarizer(st.session_state.trader, df=df)
         st.markdown(summarizer.generate())
 
-# 实时风控事件
+# ---------- 实时风控事件 ----------
 with st.expander("🚨 实时风控事件", expanded=False):
     if st.button("刷新持仓检查", key="refresh_positions"):
         if df is not None:
@@ -371,7 +370,7 @@ with st.expander("🚨 实时风控事件", expanded=False):
             else:
                 st.info("无平仓事件")
 
-# 自动刷新逻辑
+# ---------- 自动刷新 ----------
 if st.session_state.get("auto_refresh", False):
     time.sleep(30)
     st.cache_data.clear()
