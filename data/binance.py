@@ -4,11 +4,13 @@ import requests
 FUTURES_BASE_URL = "https://fapi.binance.com"
 
 def get_klines(symbol, interval, limit=500):
-    """获取币安合约K线数据"""
     url = f"{FUTURES_BASE_URL}/fapi/v1/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return None
         data = resp.json()
         df = pd.DataFrame(data, columns=[
             "time", "open", "high", "low", "close", "volume",
@@ -20,17 +22,16 @@ def get_klines(symbol, interval, limit=500):
             df[col] = df[col].astype(float)
         return df[["time", "open", "high", "low", "close", "volume"]]
     except Exception as e:
+        print(f"K线获取失败 {symbol}: {e}")
         return None
 
 def get_all_hot_symbols(limit=100):
-    """获取热门交易对（按24h成交量排序）"""
     url = f"{FUTURES_BASE_URL}/fapi/v1/ticker/24hr"
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, headers=headers, timeout=10)
         data = resp.json()
-        usdt_symbols = [item for item in data if item["symbol"].endswith("USDT")]
-        sorted_symbols = sorted(usdt_symbols, key=lambda x: float(x.get("quoteVolume", 0)), reverse=True)
-        symbols = [item["symbol"] for item in sorted_symbols[:limit]]
-        return symbols
+        usdt_symbols = [item["symbol"] for item in data if item["symbol"].endswith("USDT")]
+        return usdt_symbols[:limit]
     except Exception as e:
-        return ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
+        return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
