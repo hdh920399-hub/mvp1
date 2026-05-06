@@ -1,4 +1,5 @@
 import pandas as pd
+
 class BacktestExporter:
     @staticmethod
     def export_trades_to_csv(trades):
