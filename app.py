@@ -42,7 +42,7 @@ def get_klines_cached(symbol, interval, limit=150):
 def get_hot_symbols_cached(limit=100):
     return get_all_hot_symbols(limit)
 
-@st.cache_data(ttl=20, show_spinner=False)  # 缩短到20秒，提高价格灵敏度
+@st.cache_data(ttl=20, show_spinner=False)
 def load_ranking_cached(max_price, limit):
     try:
         df, total = scan_cheap_coins_with_signal(max_price=max_price, limit=limit, offset=0)
@@ -204,7 +204,7 @@ with st.sidebar:
         else:
             st.toast("当前无持仓")
 
-    # 刷新当前仓位价格按钮
+    # 刷新当前仓位价格按钮（侧边栏）
     if st.button("🔄 刷新当前仓位价格", use_container_width=True):
         new_prices = {}
         for sym in st.session_state.trader.holdings.keys():
@@ -220,7 +220,9 @@ with st.sidebar:
             if price:
                 new_prices[sym] = price
         if new_prices:
-            st.session_state.current_prices = new_prices
+            if "current_prices" not in st.session_state:
+                st.session_state.current_prices = {}
+            st.session_state.current_prices.update(new_prices)
             st.rerun()
         else:
             st.toast("无法获取当前价格，请稍后重试")
@@ -384,11 +386,40 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
-# ---------- 详细交易明细 ----------
+# ---------- 详细交易明细（含手动刷新按钮和合计行）----------
 with st.expander("📊 详细交易盈亏明细", expanded=False):
+    # 在表格上方添加手动刷新按钮
+    col_btn_refresh, _ = st.columns([1, 5])
+    with col_btn_refresh:
+        if st.button("🔄 刷新持仓价格", key="refresh_holdings_price"):
+            new_prices = {}
+            for sym in st.session_state.trader.holdings.keys():
+                price = None
+                if not ranking_df.empty:
+                    row = ranking_df[ranking_df["币种"] + "USDT" == sym]
+                    if not row.empty:
+                        price = row.iloc[0]["价格"]
+                if price is None:
+                    last_k = get_klines_cached(sym, "1h", limit=1)
+                    if last_k is not None and len(last_k) > 0:
+                        price = last_k["close"].iloc[-1]
+                if price:
+                    new_prices[sym] = price
+            if new_prices:
+                if "current_prices" not in st.session_state:
+                    st.session_state.current_prices = {}
+                st.session_state.current_prices.update(new_prices)
+                st.toast("✅ 持仓价格已刷新")
+                st.rerun()
+            else:
+                st.toast("❌ 无法获取最新价格，请稍后重试")
+
     if st.session_state.trader.holdings:
         st.subheader("📌 当前持仓 (未平仓)")
         holdings_data = []
+        total_open = 0.0
+        total_margin = 0.0
+        total_unrealized = 0.0
         for sym, pos in st.session_state.trader.holdings.items():
             current_price = current_prices.get(sym, pos["avg_price"])
             if pos["side"] == "LONG":
@@ -398,6 +429,10 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                 unrealized_pnl = (pos["avg_price"] - current_price) * pos["quantity"]
                 unrealized_pnl_pct = (1 - current_price / pos["avg_price"]) * 100
             total_amount = pos["avg_price"] * pos["quantity"]
+            margin = total_amount / pos.get("leverage", 1)
+            total_open += total_amount
+            total_margin += margin
+            total_unrealized += unrealized_pnl
             holdings_data.append({
                 "币种": sym,
                 "方向": pos["side"],
@@ -405,7 +440,7 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                 "当前价": round(current_price, 6),
                 "数量": pos["quantity"],
                 "开仓总额(USDT)": round(total_amount, 2),
-                "占用保证金(USDT)": round(total_amount / pos.get("leverage", 1), 2),
+                "占用保证金(USDT)": round(margin, 2),
                 "浮动盈亏(USDT)": round(unrealized_pnl, 2),
                 "盈亏%": f"{unrealized_pnl_pct:+.2f}%",
                 "止损价": round(pos["stop_loss"], 6),
@@ -413,6 +448,7 @@ with st.expander("📊 详细交易盈亏明细", expanded=False):
                 "杠杆": pos.get("leverage", 1)
             })
         st.dataframe(pd.DataFrame(holdings_data), use_container_width=True)
+        st.write(f"**合计** | 开仓总额: {total_open:.2f} U | 占用保证金: {total_margin:.2f} U | 浮动盈亏: {total_unrealized:+.2f} U")
     else:
         st.info("📭 当前无持仓")
 
@@ -476,12 +512,16 @@ with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
         if st.button("触发自适应调整", key="adapt_btn"):
             current_params = {
                 "min_score": min_score,
-                "risk_pct": risk_pct * 100
+                "risk_pct": risk_pct * 100,
+                "stop_loss_pct": stop_loss_pct * 100,
+                "take_profit_pct": take_profit_pct * 100
             }
             new_params, reason = st.session_state.adaptive_learner.adapt_params(current_params)
             if new_params != current_params:
                 st.session_state.min_score = new_params["min_score"]
                 st.session_state.risk_pct = new_params["risk_pct"]
+                st.session_state.stop_loss_pct = new_params.get("stop_loss_pct", stop_loss_pct * 100)
+                st.session_state.take_profit_pct = new_params.get("take_profit_pct", take_profit_pct * 100)
                 st.success(f"参数已调整: {reason}")
                 st.rerun()
             else:
