@@ -3,7 +3,6 @@ from datetime import datetime
 import pandas as pd
 import time
 
-# 导入所有模块
 from data.binance import get_klines, get_all_hot_symbols
 from engine.ai_signals import calculate_directional_signal
 from engine.strategy_engine import StrategyEngine
@@ -20,7 +19,6 @@ from ui.chart import create_pro_chart
 
 st.set_page_config(page_title="AlphaPilot AI", layout="wide", page_icon="🤖")
 
-# ========== 全局缓存 ==========
 @st.cache_data(ttl=15, show_spinner=False)
 def get_klines_cached(symbol, interval, limit=150):
     return get_klines(symbol, interval, limit)
@@ -29,7 +27,7 @@ def get_klines_cached(symbol, interval, limit=150):
 def get_hot_symbols_cached(limit=100):
     return get_all_hot_symbols(limit)
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_ranking_cached(max_price, limit):
     try:
         df, total = scan_cheap_coins_with_signal(max_price=max_price, limit=limit, offset=0)
@@ -38,7 +36,6 @@ def load_ranking_cached(max_price, limit):
         st.error(f"获取排行榜失败: {e}")
         return pd.DataFrame(), 0
 
-# ========== 初始化 Session State ==========
 if "trader" not in st.session_state:
     st.session_state.trader = SimulatedTrader(100)
 if "strategy_engine" not in st.session_state:
@@ -59,11 +56,10 @@ if "auto_refresh" not in st.session_state:
 st.title("🤖 AlphaPilot AI - 合约智能交易终端")
 st.caption("币安U本位 | 多空双向 | 低价币扫描 | 遗传/贝叶斯优化 | 自适应学习 | 自动止盈止损 | AI自动交易 | 实时刷新")
 
-# ========== 侧边栏配置 ==========
 with st.sidebar:
     st.header("⚙️ 配置")
     capital = st.number_input("💰 虚拟本金", min_value=10, value=100, step=10)
-    max_price = st.slider("💰 最高价(USDT)", 0.1, 2.0, 1.0)
+    max_price = st.slider("💰 最高价(USDT)", 0.1, 100.0, 1.0, step=0.5)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔄 重置账户"):
@@ -91,14 +87,11 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("🤖 AI 自动交易")
     auto_enabled = st.checkbox("启用自动交易", value=False)
-
-    # 自动交易参数（即使未启用，立即扫描按钮也会使用）
     auto_interval = st.selectbox("扫描间隔(秒)", [30, 60, 120], index=1, key="auto_interval")
-    auto_max_positions = st.number_input("最大同时持仓数", 1, 5, 3, key="auto_max_pos")
+    auto_max_positions = st.number_input("最大同时持仓数", 1, 5, 3, key="auto_max_positions")
     auto_risk_pct = st.slider("单笔风险(占总资金%)", 1, 20, 10, key="auto_risk") / 100
-    auto_min_score = st.slider("开仓最低评分", 40, 80, 55, key="auto_min_score")
+    auto_min_score = st.slider("开仓最低评分", 10, 80, 40, key="auto_min_score")
 
-    # 立即扫描按钮（不依赖自动交易开关）
     if st.button("⚡ 立即扫描交易", use_container_width=True):
         with st.spinner("正在扫描市场并执行交易..."):
             result = auto_trade(
@@ -131,15 +124,12 @@ with st.sidebar:
                 if result.get("trades"):
                     for trade in result["trades"]:
                         st.toast(f"🤖 {trade['action']} {trade['symbol']} @ {trade['price']:.6f}")
-                else:
-                    st.toast("🤖 未发现合适交易机会")
     else:
         st.caption("自动交易未启用")
 
     st.markdown("---")
     st.caption(f"⏱️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ========== 低价潜力币排行榜 ==========
 st.subheader("🏆 低价潜力币排行榜")
 col_btn1, col_btn2, col_btn3, col_refresh = st.columns(4)
 with col_btn1:
@@ -181,27 +171,10 @@ if not ranking_df.empty:
     st.caption(f"💡 共 {total_count} 个低价币 | ≥70强烈推荐 | 55-69值得关注 | <40建议避开")
 else:
     st.warning("暂无数据，请调高价格上限")
-# 按希望的顺序选择要显示的列
-display_cols = ["币种", "价格", "24h涨跌", "24h量(百万U)", "RSI", "AI信号", "评分", "AI分析"]
-available_cols = [c for c in display_cols if c in ranking_df.columns]
-
-# 对评分列应用高亮样式
-styled = ranking_df[available_cols].style.applymap(highlight_score, subset=['评分'])
-
-# 显示表格
-st.dataframe(styled, use_container_width=True, height=450)
-
-# 保持原来的提示信息
-st.caption(f"💡 共 {total_count} 个低价币 | ≥70强烈推荐 | 55-69值得关注 | <40建议避开")
-    st.caption(f"💡 共 {total_count} 个低价币 | ≥70强烈推荐 | 55-69值得关注 | <40建议避开")
-else:
-    st.warning("暂无数据，请调高价格上限")
 
 st.markdown("---")
 
-# ========== 专业K线分析 + 自定义币种搜索 ==========
 st.subheader("📈 专业K线分析")
-
 col_select, col_custom = st.columns([3, 1])
 with col_select:
     if not ranking_df.empty:
@@ -217,7 +190,7 @@ with col_custom:
         custom_symbol += "USDT"
     if custom_symbol:
         selected_symbol = custom_symbol
-
+        st.info(f"当前分析币种: {selected_symbol}")
 interval = st.selectbox("K线周期", ["15m", "1h", "4h", "1d"], index=2)
 
 with st.spinner(f"📈 正在加载 {selected_symbol} K线数据..."):
@@ -249,7 +222,6 @@ with col_right:
     else:
         st.info("等待数据...")
 
-# ========== 账户表现 ==========
 st.markdown("---")
 perf = st.session_state.trader.get_performance()
 col_a, col_b, col_c, col_d = st.columns(4)
@@ -264,23 +236,19 @@ if st.button("📥 导出回测报告"):
         st.download_button("📊 下载交易记录", trades_csv, "trades.csv", "text/csv")
     st.download_button("📈 下载账户表现", perf_csv, "performance.csv", "text/csv")
 
-# ========== 详细交易盈亏明细 ==========
 with st.expander("📊 详细交易盈亏明细", expanded=False):
     if st.session_state.trader.trades:
         closed_trades = [t for t in st.session_state.trader.trades if t.get("action") == "CLOSE"]
         if closed_trades:
-            df_trades_detail = pd.DataFrame(closed_trades)
-            available_cols = [c for c in ["timestamp", "symbol", "action", "entry_price", "exit_price", "quantity", "pnl", "reason"] if c in df_trades_detail.columns]
-            if not available_cols:
-                st.info("交易记录字段不完整（缺少入场/出场价）")
-            else:
-                st.dataframe(df_trades_detail[available_cols], use_container_width=True)
+            df_trades = pd.DataFrame(closed_trades)
+            show_cols = ["timestamp", "symbol", "action", "entry_price", "exit_price", "quantity", "pnl", "reason"]
+            available = [c for c in show_cols if c in df_trades.columns]
+            st.dataframe(df_trades[available], use_container_width=True)
         else:
             st.info("暂无平仓记录")
     else:
         st.info("暂无交易记录")
 
-# ========== 深度优化引擎（折叠） ==========
 st.markdown("---")
 with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
     tab1, tab2, tab3, tab4 = st.tabs(["📊 市场状态", "⚙️ 策略参数", "🧬 优化器", "🧠 自适应学习"])
@@ -289,7 +257,7 @@ with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
             regime = st.session_state.regime_detector.detect_regime(df)
             st.json(regime)
         else:
-            st.warning("数据不足，无法分析市场状态")
+            st.warning("数据不足")
     with tab2:
         st.json(st.session_state.strategy_engine.params)
         if st.button("重置为默认参数"):
@@ -308,28 +276,26 @@ with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
                     st.session_state.optimizer_result = res
                     st.success(res.get("message", "优化完成"))
             else:
-                st.error("数据不足，需要至少500根K线")
+                st.error("数据不足，需要500+根K线")
         if st.session_state.optimizer_result:
             st.json(st.session_state.optimizer_result.get("best_params", {}))
     with tab4:
         st.markdown(st.session_state.adaptive_learner.get_learning_summary())
-        if st.button("🔄 触发自适应调整"):
+        if st.button("触发自适应调整"):
             new_params, reason = st.session_state.adaptive_learner.adapt_params(st.session_state.strategy_engine.params)
             if new_params != st.session_state.strategy_engine.params:
                 st.session_state.strategy_engine = StrategyEngine(new_params)
-                st.success(f"参数已调整: {reason}")
+                st.success(f"已调整: {reason}")
             else:
                 st.info(reason)
 
-# ========== 每日总结 ==========
 with st.expander("📋 每日总结报告", expanded=False):
-    if st.button("📄 生成今日报告"):
+    if st.button("生成今日报告"):
         summarizer = DailySummarizer(st.session_state.trader)
         st.markdown(summarizer.generate())
 
-# ========== 实时风控事件 ==========
 with st.expander("🚨 实时风控事件", expanded=False):
-    if st.button("🔄 刷新持仓检查"):
+    if st.button("刷新持仓检查"):
         if df is not None:
             closed = st.session_state.trader.update_positions({selected_symbol: df["close"].iloc[-1]})
             if closed:
@@ -338,7 +304,6 @@ with st.expander("🚨 实时风控事件", expanded=False):
             else:
                 st.info("无平仓事件")
 
-# ========== 自动刷新逻辑 ==========
 if st.session_state.get("auto_refresh", False):
     time.sleep(30)
     st.cache_data.clear()
