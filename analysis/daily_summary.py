@@ -88,11 +88,12 @@ class DailySummarizer:
 """
             return report
 
-        # 无平仓记录：显示当前持仓实时盈亏
+        # 无平仓记录：显示当前持仓详情与市场状态
         holdings = self.trader.holdings
         if not holdings:
             return f"📅 **AI 智能交易日报 - {today}**\n\n暂无持仓及平仓记录。\n当前可用余额: {perf['可用余额']} USDT"
 
+        # 计算总浮动盈亏（使用传入的 current_prices）
         total_unrealized = 0.0
         lines = []
         for sym, pos in holdings.items():
@@ -104,6 +105,7 @@ class DailySummarizer:
             total_unrealized += unrealized
             lines.append(f"- {sym} {pos['side']} 开仓价 {pos['avg_price']:.6f} 当前价 {current_price:.6f} 浮动盈亏 {unrealized:+.2f} USDT (杠杆 {pos.get('leverage',1)}x)")
 
+        # 市场状态分析
         market_status = ""
         if self.df is not None and len(self.df) >= 100:
             try:
@@ -116,11 +118,11 @@ class DailySummarizer:
 
         risk_advice = ""
         if total_unrealized > 0:
-            risk_advice = "✅ 总体浮动盈利，可考虑适当提高止盈点或继续持有。"
+            risk_advice = "✅ **总体浮动盈利**，可考虑适当提高止盈点或继续持有。"
         elif total_unrealized < 0:
-            risk_advice = "⚠️ 总体浮动亏损，建议检查止损设置，控制风险。"
+            risk_advice = "⚠️ **总体浮动亏损**，建议检查止损设置，控制风险。"
         else:
-            risk_advice = "⚪ 持仓持平，等待价格明确方向。"
+            risk_advice = "⚪ **持仓持平**，等待价格明确方向。"
 
         report = f"""
 📅 **AI 智能交易日报 - {today}**
