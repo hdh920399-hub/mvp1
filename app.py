@@ -19,7 +19,7 @@ from ui.chart import create_pro_chart
 
 st.set_page_config(page_title="AlphaPilot AI", layout="wide", page_icon="🤖")
 
-@st.cache_data(ttl=15, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_klines_cached(symbol, interval, limit=150):
     return get_klines(symbol, interval, limit)
 
