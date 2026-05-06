@@ -52,8 +52,7 @@ class SimulatedTrader:
         raise TypeError(f"Type {type(obj)} not serializable")
 
     def buy(self, symbol, price, usdt_amount, leverage=1, stop_loss_pct=None, take_profit_pct=None):
-        # 逐仓保证金 = 开仓价值 / 杠杆
-        margin = (usdt_amount / price) * price / leverage  # 即 usdt_amount / leverage
+        margin = usdt_amount / leverage
         if margin > self.balance:
             return False, f"余额不足"
         quantity = usdt_amount / price
@@ -66,7 +65,7 @@ class SimulatedTrader:
             "stop_loss": price * (1 - sl_pct),
             "take_profit": price * (1 + tp_pct),
             "leverage": leverage,
-            "margin": margin   # 记录占用保证金
+            "margin": margin
         }
         self.balance -= margin
         self.trades.append({
@@ -133,7 +132,7 @@ class SimulatedTrader:
                     pnl = (pos["avg_price"] - price) * pos["quantity"]
                     reason = "take_profit"
             if reason:
-                margin_used = pos["margin"]   # 释放保证金
+                margin_used = pos["margin"]
                 self.balance += margin_used + pnl
                 self.trades.append({
                     "timestamp": datetime.now(),
@@ -152,10 +151,45 @@ class SimulatedTrader:
             self.save_state()
         return closed
 
+    def force_close_position(self, symbol, current_price):
+        if symbol not in self.holdings:
+            return False, 0, "无此持仓"
+        pos = self.holdings[symbol]
+        if pos["side"] == "LONG":
+            pnl = (current_price - pos["avg_price"]) * pos["quantity"]
+        else:
+            pnl = (pos["avg_price"] - current_price) * pos["quantity"]
+        margin_used = pos["margin"]
+        self.balance += margin_used + pnl
+        self.trades.append({
+            "timestamp": datetime.now(),
+            "symbol": symbol,
+            "action": "CLOSE",
+            "entry_price": pos["avg_price"],
+            "exit_price": current_price,
+            "quantity": pos["quantity"],
+            "margin": margin_used,
+            "pnl": pnl,
+            "reason": "manual_close"
+        })
+        del self.holdings[symbol]
+        self.save_state()
+        return True, pnl, f"平仓成功，盈亏 {pnl:+.2f} U"
+
+    def force_close_all_positions(self, current_prices):
+        closed = []
+        for sym in list(self.holdings.keys()):
+            price = current_prices.get(sym)
+            if price is None:
+                continue
+            success, pnl, msg = self.force_close_position(sym, price)
+            if success:
+                closed.append({"symbol": sym, "pnl": pnl})
+        return closed
+
     def get_total_asset(self, current_prices=None):
         if current_prices is None:
             current_prices = {}
-        # 总资产 = 可用余额 + 所有持仓的浮动盈亏总和
         total_unrealized = 0.0
         for symbol, pos in self.holdings.items():
             price = current_prices.get(symbol, pos["avg_price"])
@@ -171,7 +205,6 @@ class SimulatedTrader:
         realized_pnl = sum(t.get("pnl", 0) for t in closed)
         win_rate = len([t for t in closed if t.get("pnl", 0) > 0]) / max(1, len(closed)) * 100
         total_asset = self.get_total_asset(current_prices)
-        # 收益率只基于已实现盈亏
         return_percent = (realized_pnl / self.initial_balance) * 100
         return {
             "初始本金": self.initial_balance,
