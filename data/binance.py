@@ -28,7 +28,7 @@ def get_klines(symbol, interval, limit=500):
                 df[col] = df[col].astype(float)
             return df[["time", "open", "high", "low", "close", "volume"]]
         else:
-            print(f"状态码异常: {resp.status_code}, 响应: {resp.text[:200]}")
+            print(f"状态码异常: {resp.status_code}")
             return None
     except Exception as e:
         print(f"获取K线失败 {symbol}: {e}")
@@ -49,18 +49,39 @@ def get_all_hot_symbols(limit=100):
     return ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
 
 def get_current_funding_rate(symbol):
-    """获取当前资金费率（最新）"""
-    url = f"{FUTURES_BASE_URL}/fapi/v1/fundingRate?symbol={symbol}"
+    """获取当前资金费率"""
+    url = f"{FUTURES_BASE_URL}/fapi/v1/premiumIndex"
     try:
-        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        resp = requests.get(url, params={"symbol": symbol}, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            return float(data.get("lastFundingRate", 0))
+    except Exception as e:
+        print(f"获取资金费率失败 {symbol}: {e}")
+    return 0
+
+def get_open_interest(symbol):
+    """获取当前持仓量（美元计价）"""
+    url = f"{FUTURES_BASE_URL}/fapi/v1/openInterest"
+    try:
+        resp = requests.get(url, params={"symbol": symbol}, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            oi_usdt = float(data["openInterest"]) * float(data.get("lastPrice", 0))
+            return oi_usdt
+    except Exception as e:
+        print(f"获取持仓量失败 {symbol}: {e}")
+    return 0
+
+def get_top_long_short_ratio(symbol):
+    """获取顶级账户多空比（账户数多空比）"""
+    url = f"{FUTURES_BASE_URL}/futures/data/topLongShortAccountRatio"
+    try:
+        resp = requests.get(url, params={"symbol": symbol, "period": "5m"}, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             if data:
-                return {
-                    "funding_rate": float(data[0]['fundingRate']),
-                    "funding_time": datetime.fromtimestamp(data[0]['fundingTime'] / 1000),
-                    "next_funding_time": datetime.fromtimestamp(data[0]['fundingTime'] / 1000 + 8*3600)  # 8小时后
-                }
+                return float(data[-1].get("longShortRatio", 1.0))
     except Exception as e:
-        print(f"获取资金费率失败 {symbol}: {e}")
-    return None
+        print(f"获取多空比失败 {symbol}: {e}")
+    return 1.0
