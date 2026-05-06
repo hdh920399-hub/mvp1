@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import time
 
-from data.binance import get_klines, get_all_hot_symbols, get_current_funding_rate
+from data.binance import get_klines, get_all_hot_symbols, get_funding_rate as get_current_funding_rate
 from engine.ai_signals import calculate_directional_signal
 from engine.strategy_engine import StrategyEngine
 from engine.param_optimizer import GeneticOptimizer
