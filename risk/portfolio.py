@@ -1,7 +1,6 @@
 import json
 import os
 from datetime import datetime
-import numpy as np
 
 STATE_FILE = "trader_state.json"
 
@@ -24,9 +23,9 @@ class SimulatedTrader:
         }
         try:
             with open(STATE_FILE, "w") as f:
-                json.dump(state, f, default=self._json_serial, indent=2)
-        except Exception as e:
-            print(f"保存状态失败: {e}")
+                json.dump(state, f, indent=2)
+        except:
+            pass
 
     def load_state(self):
         if not os.path.exists(STATE_FILE):
@@ -38,23 +37,14 @@ class SimulatedTrader:
                 self.holdings = state["holdings"]
                 self.trades = state["trades"]
                 self.initial_balance = state.get("initial_balance", self.initial_balance)
-                for t in self.trades:
-                    if "timestamp" in t and isinstance(t["timestamp"], str):
-                        t["timestamp"] = datetime.fromisoformat(t["timestamp"])
                 return True
-        except Exception as e:
-            print(f"加载状态失败: {e}")
+        except:
             return False
-
-    def _json_serial(self, obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serializable")
 
     def buy(self, symbol, price, usdt_amount, leverage=1):
         margin = usdt_amount / leverage
         if margin > self.balance:
-            return False, f"余额不足"
+            return False, "余额不足"
         quantity = usdt_amount / price
         self.holdings[symbol] = {
             "quantity": quantity,
@@ -70,7 +60,6 @@ class SimulatedTrader:
             "symbol": symbol,
             "action": "BUY",
             "entry_price": price,
-            "price": price,
             "quantity": quantity,
             "pnl": 0
         })
@@ -80,7 +69,7 @@ class SimulatedTrader:
     def short(self, symbol, price, usdt_amount, leverage=1):
         margin = usdt_amount / leverage
         if margin > self.balance:
-            return False, f"余额不足"
+            return False, "余额不足"
         quantity = usdt_amount / price
         self.holdings[symbol] = {
             "quantity": quantity,
@@ -96,7 +85,6 @@ class SimulatedTrader:
             "symbol": symbol,
             "action": "SHORT",
             "entry_price": price,
-            "price": price,
             "quantity": quantity,
             "pnl": 0
         })
@@ -107,40 +95,45 @@ class SimulatedTrader:
         closed = []
         for symbol, pos in list(self.holdings.items()):
             price = current_prices.get(symbol)
-            if price is None:
+            if not price:
                 continue
-            pnl = 0
-            reason = ""
             if pos["side"] == "LONG":
-                if price <= pos["stop_loss"]:
+                if price <= pos["stop_loss"] or price >= pos["take_profit"]:
                     pnl = (price - pos["avg_price"]) * pos["quantity"]
-                    reason = "stop_loss"
-                elif price >= pos["take_profit"]:
-                    pnl = (price - pos["avg_price"]) * pos["quantity"]
-                    reason = "take_profit"
-            else:
-                if price >= pos["stop_loss"]:
+                    reason = "stop_loss" if price <= pos["stop_loss"] else "take_profit"
+                    # 平仓逻辑
+                    margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
+                    self.balance += margin_used + pnl
+                    self.trades.append({
+                        "timestamp": datetime.now(),
+                        "symbol": symbol,
+                        "action": "CLOSE",
+                        "entry_price": pos["avg_price"],
+                        "exit_price": price,
+                        "quantity": pos["quantity"],
+                        "pnl": pnl,
+                        "reason": reason
+                    })
+                    del self.holdings[symbol]
+                    closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
+            else:  # SHORT
+                if price >= pos["stop_loss"] or price <= pos["take_profit"]:
                     pnl = (pos["avg_price"] - price) * pos["quantity"]
-                    reason = "stop_loss"
-                elif price <= pos["take_profit"]:
-                    pnl = (pos["avg_price"] - price) * pos["quantity"]
-                    reason = "take_profit"
-            if reason:
-                margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
-                self.balance += margin_used + pnl
-                self.trades.append({
-                    "timestamp": datetime.now(),
-                    "symbol": symbol,
-                    "action": "CLOSE",
-                    "entry_price": pos["avg_price"],
-                    "exit_price": price,
-                    "price": price,
-                    "quantity": pos["quantity"],
-                    "pnl": pnl,
-                    "reason": reason
-                })
-                del self.holdings[symbol]
-                closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
+                    reason = "stop_loss" if price >= pos["stop_loss"] else "take_profit"
+                    margin_used = pos["quantity"] * pos["avg_price"] / pos.get("leverage", 1)
+                    self.balance += margin_used + pnl
+                    self.trades.append({
+                        "timestamp": datetime.now(),
+                        "symbol": symbol,
+                        "action": "CLOSE",
+                        "entry_price": pos["avg_price"],
+                        "exit_price": price,
+                        "quantity": pos["quantity"],
+                        "pnl": pnl,
+                        "reason": reason
+                    })
+                    del self.holdings[symbol]
+                    closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
         if closed:
             self.save_state()
         return closed
