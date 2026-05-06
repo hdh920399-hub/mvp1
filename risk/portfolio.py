@@ -8,8 +8,8 @@ STATE_FILE = "trader_state.json"
 class SimulatedTrader:
     def __init__(self, initial_balance=100):
         self.initial_balance = initial_balance
-        self.stop_loss_pct = 0.02   # 默认2%
-        self.take_profit_pct = 0.05 # 默认5%
+        self.stop_loss_pct = 0.02
+        self.take_profit_pct = 0.05
         if not self.load_state():
             self.balance = initial_balance
             self.holdings = {}
@@ -150,13 +150,18 @@ class SimulatedTrader:
         return closed
 
     def get_total_asset(self, current_prices=None):
+        """正确计算总资产：可用余额 + 所有持仓的浮动盈亏总和"""
         if current_prices is None:
             current_prices = {}
-        holdings_value = 0.0
+        total_unrealized = 0.0
         for symbol, pos in self.holdings.items():
             price = current_prices.get(symbol, pos["avg_price"])
-            holdings_value += abs(pos["quantity"]) * price
-        return self.balance + holdings_value
+            if pos["side"] == "LONG":
+                unrealized = (price - pos["avg_price"]) * pos["quantity"]
+            else:
+                unrealized = (pos["avg_price"] - price) * pos["quantity"]
+            total_unrealized += unrealized
+        return self.balance + total_unrealized
 
     def get_performance(self, current_prices=None):
         closed = [t for t in self.trades if t["action"] == "CLOSE"]
