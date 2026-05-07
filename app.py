@@ -548,24 +548,30 @@ with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
     with tab4:
         st.markdown(st.session_state.adaptive_learner.get_learning_summary())
         if st.button("触发自适应调整", key="adapt_btn"):
-            current_params = {
-                "long_min_score": long_min_score,
-                "short_min_score": short_min_score,
-                "risk_pct": risk_pct * 100,
-                "stop_loss_pct": stop_loss_pct * 100,
-                "take_profit_pct": take_profit_pct * 100
-            }
-            new_params, reason = st.session_state.adaptive_learner.adapt_params(current_params)
-            if new_params != current_params:
-                st.session_state.long_min_score = new_params.get("long_min_score", long_min_score)
-                st.session_state.short_min_score = new_params.get("short_min_score", short_min_score)
-                st.session_state.risk_pct = new_params.get("risk_pct", risk_pct * 100)
-                st.session_state.stop_loss_pct = new_params.get("stop_loss_pct", stop_loss_pct * 100)
-                st.session_state.take_profit_pct = new_params.get("take_profit_pct", take_profit_pct * 100)
-                st.success(f"参数已调整: {reason}")
-                st.rerun()
-            else:
-                st.info(reason)
+    # 注意：我们不再修改 st.session_state.long_min_score 本身
+    # 而是根据学习器的建议，通过 st.rerun() 来更新界面上的默认值
+    
+    current_params = {
+        "long_min_score": long_min_score,
+        "short_min_score": short_min_score,
+        "risk_pct": risk_pct * 100,
+    }
+    new_params, reason = st.session_state.adaptive_learner.adapt_params(current_params)
+    
+    if new_params != current_params:
+        # 将新的建议值暂存到 session_state 的另一个地方
+        st.session_state.pending_long_min_score = new_params.get("long_min_score", long_min_score)
+        st.session_state.pending_short_min_score = new_params.get("short_min_score", short_min_score)
+        st.session_state.pending_risk_pct = new_params.get("risk_pct", risk_pct * 100)
+        st.warning(reason)
+        if st.button("📥 应用建议参数"):
+            # 用户点击确认后，才真正更新默认值并刷新页面
+            st.session_state.long_min_score = st.session_state.pending_long_min_score
+            st.session_state.short_min_score = st.session_state.pending_short_min_score
+            st.session_state.risk_pct = st.session_state.pending_risk_pct
+            st.rerun()
+    else:
+        st.info(reason)
 
 # ---------- 每日总结 ----------
 with st.expander("📋 每日总结报告", expanded=False):
