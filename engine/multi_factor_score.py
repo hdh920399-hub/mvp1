@@ -3,7 +3,7 @@ import numpy as np
 from data.binance import get_open_interest, get_funding_rate, get_top_long_short_ratio
 
 class MultiFactorScorer:
-    """多因子评分引擎 - 修复版（信号与分数匹配）"""
+    """多因子评分引擎 - 同时计算做多分和做空分"""
     
     def __init__(self, df, price_now, symbol, volume_series, change_24h):
         self.df = df
@@ -71,19 +71,18 @@ class MultiFactorScorer:
         ma200 = self.close.rolling(200).mean().iloc[-1] if len(self.df) >= 200 else ma50
 
         if self.price_now > ma20 > ma50 > ma200:
-            self.trend_score += 25
-            self.factors_detail.append("✅ 完全多头排列 (+25)")
+            self.trend_score += 20
+            self.factors_detail.append("✅ 完全多头排列 (+20)")
         elif self.price_now > ma20 and self.price_now > ma50:
-            self.trend_score += 15
-            self.factors_detail.append("✅ 价格在均线上方 (+15)")
+            self.trend_score += 12
+            self.factors_detail.append("✅ 价格在均线上方 (+12)")
         elif self.price_now < ma20 < ma50 < ma200:
-            self.trend_score -= 25
-            self.factors_detail.append("❌ 完全空头排列 (-25)")
+            self.trend_score -= 20
+            self.factors_detail.append("❌ 完全空头排列 (-20)")
         elif self.price_now < ma20 and self.price_now < ma50:
-            self.trend_score -= 15
-            self.factors_detail.append("❌ 价格在均线下方 (-15)")
+            self.trend_score -= 12
+            self.factors_detail.append("❌ 价格在均线下方 (-12)")
 
-        # 价格相对MA20位置
         ma20_pos = (self.price_now - ma20) / ma20
         if ma20_pos > 0.03:
             self.trend_score += 10
@@ -109,24 +108,24 @@ class MultiFactorScorer:
         _, _, macd_hist = self.calculate_macd()
 
         if rsi_val < 25:
-            self.momentum_score += 30
-            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 极端超卖 (+30)")
+            self.momentum_score += 25
+            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 极端超卖 (+25)")
         elif rsi_val > 75:
-            self.momentum_score -= 30
-            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 极端超买 (-30)")
+            self.momentum_score -= 25
+            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 极端超买 (-25)")
         elif rsi_val < 35:
-            self.momentum_score += 20
-            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 超卖区 (+20)")
+            self.momentum_score += 15
+            self.factors_detail.append(f"🟢 RSI={rsi_val:.1f} 超卖区 (+15)")
         elif rsi_val > 65:
-            self.momentum_score -= 20
-            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 超买区 (-20)")
+            self.momentum_score -= 15
+            self.factors_detail.append(f"🔴 RSI={rsi_val:.1f} 超买区 (-15)")
 
         if macd_hist.iloc[-1] > 0 and macd_hist.iloc[-2] <= 0:
-            self.momentum_score += 20
-            self.factors_detail.append("✅ MACD金叉 (+20)")
+            self.momentum_score += 15
+            self.factors_detail.append("✅ MACD金叉 (+15)")
         elif macd_hist.iloc[-1] < 0 and macd_hist.iloc[-2] >= 0:
-            self.momentum_score -= 20
-            self.factors_detail.append("❌ MACD死叉 (-20)")
+            self.momentum_score -= 15
+            self.factors_detail.append("❌ MACD死叉 (-15)")
         elif macd_hist.iloc[-1] > 0:
             self.momentum_score += 8
             self.factors_detail.append("📈 MACD柱为正 (+8)")
@@ -173,7 +172,7 @@ class MultiFactorScorer:
         funding_pct = funding * 100
         if funding < -0.05:
             self.sentiment_score += 10
-            self.factors_detail.append(f"📉 资金费率 {funding_pct:.3f}% (空头拥挤，利好做多) (+10)")
+            self.factors_detail.append(f"📉 资金费率 {funding_pct:.3f}% (空头拥挤) (+10)")
         elif funding > 0.1:
             self.sentiment_score -= 10
             self.factors_detail.append(f"📈 资金费率 {funding_pct:.3f}% (多头拥挤) (-10)")
@@ -189,56 +188,46 @@ class MultiFactorScorer:
             self.sentiment_score -= 10
             self.factors_detail.append(f"⚠️ 24h振幅 {abs(self.change_24h):.1f}% 过大 (-10)")
 
-    # ---------- 综合评分 ----------
-    def calculate_total_score(self):
+    # ---------- 综合评分（返回做多分和做空分）----------
+    def calculate_scores(self):
         self.calc_trend_factor()
         self.calc_momentum_factor()
         self.calc_volume_factor()
         self.calc_sentiment_factor()
 
-        # 基础分70 + 各因子得分（总分范围理论上 -10 ~ 150）
-        total_raw = 70 + self.trend_score + self.momentum_score + self.volume_score + self.sentiment_score
-        # 限制在 0-100 之间
+        # 基础分 50
+        total_raw = 50 + self.trend_score + self.momentum_score + self.volume_score + self.sentiment_score
         total_score = max(0, min(100, int(total_raw)))
 
-        # 信号判定（根据分数线性映射）
-        if total_score >= 75:
-            signal_text = "🟢 强烈做多"
-            direction = "LONG"
-        elif total_score >= 60:
-            signal_text = "🟢 做多"
-            direction = "LONG"
-        elif total_score >= 40:
-            signal_text = "⚪ 观望"
-            direction = "NEUTRAL"
-        elif total_score >= 25:
-            signal_text = "🔴 做空"
-            direction = "SHORT"
-        else:
-            signal_text = "🔴 强烈做空"
-            direction = "SHORT"
+        # 做多分 = 总分（越高越适合做多）
+        long_score = total_score
+        # 做空分 = 100 - 总分（越高越适合做空）
+        short_score = 100 - total_score
 
-        # 动态杠杆（基于ATR波动率）
-        _, atr = self.calculate_adx()
-        volatility_pct = atr / self.price_now * 100
-        if volatility_pct > 5:
-            leverage = 1
-        elif volatility_pct > 3:
-            leverage = 3
-        elif volatility_pct > 1.5:
-            leverage = 5
+        # 信号文本
+        if long_score >= 60:
+            long_signal = "🟢 做多"
         else:
-            leverage = 10
+            long_signal = "⚪ 弱"
 
-        analysis = "；".join(self.factors_detail) + f"。综合评分：{total_score}分。建议杠杆：{leverage}x。方向：{direction}。"
+        if short_score >= 60:
+            short_signal = "🔴 做空"
+        else:
+            short_signal = "⚪ 弱"
+
+        # 分析文本
+        long_analysis = "；".join(self.factors_detail) + f"。综合做多分：{long_score}分。"
+        short_analysis = "；".join(self.factors_detail) + f"。综合做空分：{short_score}分。"
+
         rsi_val, _ = self.calculate_rsi()
 
         return {
-            "total_score": total_score,
-            "direction": direction,
-            "signal_text": signal_text,
-            "leverage": leverage,
-            "analysis": analysis,
+            "long_score": long_score,
+            "short_score": short_score,
+            "long_signal": long_signal,
+            "short_signal": short_signal,
+            "long_analysis": long_analysis,
+            "short_analysis": short_analysis,
             "rsi": round(rsi_val, 1),
             "factors": self.factors_detail
         }
