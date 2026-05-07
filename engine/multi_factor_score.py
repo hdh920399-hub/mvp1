@@ -188,8 +188,9 @@ class MultiFactorScorer:
             self.sentiment_score -= 10
             self.factors_detail.append(f"⚠️ 24h振幅 {abs(self.change_24h):.1f}% 过大 (-10)")
 
-    # ---------- 综合评分（返回做多分和做空分）----------
+    # ---------- 综合评分（核心方法）----------
     def calculate_scores(self):
+        """计算做多分和做空分，返回字典"""
         self.calc_trend_factor()
         self.calc_momentum_factor()
         self.calc_volume_factor()
