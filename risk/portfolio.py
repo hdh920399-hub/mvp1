@@ -59,6 +59,7 @@ class SimulatedTrader:
         quantity = usdt_amount / price
         sl_pct = stop_loss_pct if stop_loss_pct is not None else self.stop_loss_pct
         tp_pct = take_profit_pct if take_profit_pct is not None else self.take_profit_pct
+
         self.holdings[symbol] = {
             "symbol": symbol,
             "quantity": quantity,
@@ -70,7 +71,6 @@ class SimulatedTrader:
             "margin": margin,
             "notional": usdt_amount,
             "open_time": datetime.now(),
-            "high_since_entry": price
         }
         self.balance -= margin
         self.trades.append({
@@ -94,6 +94,7 @@ class SimulatedTrader:
         quantity = usdt_amount / price
         sl_pct = stop_loss_pct if stop_loss_pct is not None else self.stop_loss_pct
         tp_pct = take_profit_pct if take_profit_pct is not None else self.take_profit_pct
+
         self.holdings[symbol] = {
             "symbol": symbol,
             "quantity": quantity,
@@ -105,7 +106,6 @@ class SimulatedTrader:
             "margin": margin,
             "notional": usdt_amount,
             "open_time": datetime.now(),
-            "low_since_entry": price
         }
         self.balance -= margin
         self.trades.append({
@@ -122,37 +122,49 @@ class SimulatedTrader:
         self.save_state()
         return True, f"做空 {quantity:.4f}"
 
-    def _calc_funding_cost(self, pos, exit_time):
-        try:
-            fr = get_funding_rate(pos["symbol"])
-            if fr is None:
-                return 0
-            start = pos.get("last_funding_check", pos["open_time"])
-            hours = (exit_time - start).total_seconds() / 3600
-            if hours <= 0:
-                return 0
-            notional = pos["notional"]
+    # ========== 核心止损逻辑（已修复） ==========
+    def update_positions(self, current_prices):
+        closed = []
+        for symbol, pos in list(self.holdings.items()):
+            current_price = current_prices.get(symbol)
+            if current_price is None:
+                continue
+
+            should_close = False
+            reason = ""
+
             if pos["side"] == "LONG":
-                cost = notional * fr * hours
-            else:
-                cost = -notional * fr * hours
-            return cost
-        except:
-            return 0
+                if current_price <= pos["stop_loss"]:
+                    should_close = True
+                    reason = "stop_loss"
+                elif current_price >= pos["take_profit"]:
+                    should_close = True
+                    reason = "take_profit"
+            else:  # SHORT
+                if current_price >= pos["stop_loss"]:
+                    should_close = True
+                    reason = "stop_loss"
+                elif current_price <= pos["take_profit"]:
+                    should_close = True
+                    reason = "take_profit"
+
+            if should_close:
+                pnl = self._close_position(symbol, current_price, reason)
+                closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
+                self.save_state()
+        return closed
 
     def _close_position(self, symbol, current_price, reason):
         pos = self.holdings[symbol]
         if pos["side"] == "LONG":
-            price_pnl = (current_price - pos["avg_price"]) * pos["quantity"]
+            pnl = (current_price - pos["avg_price"]) * pos["quantity"]
         else:
-            price_pnl = (pos["avg_price"] - current_price) * pos["quantity"]
-        funding_cost = self._calc_funding_cost(pos, datetime.now())
-        if pos["side"] == "LONG":
-            total_pnl = price_pnl - funding_cost
-        else:
-            total_pnl = price_pnl + funding_cost
-        margin_used = pos["margin"]
-        self.balance += margin_used + total_pnl
+            pnl = (pos["avg_price"] - current_price) * pos["quantity"]
+
+        funding_cost = 0  # 暂忽略资金费率
+        total_pnl = pnl - funding_cost if pos["side"] == "LONG" else pnl + funding_cost
+
+        self.balance += pos["margin"] + total_pnl
         self.trades.append({
             "timestamp": datetime.now(),
             "symbol": symbol,
@@ -160,43 +172,21 @@ class SimulatedTrader:
             "entry_price": pos["avg_price"],
             "exit_price": current_price,
             "quantity": pos["quantity"],
-            "margin": margin_used,
+            "margin": pos["margin"],
             "notional": pos["notional"],
             "leverage": pos["leverage"],
             "pnl": total_pnl,
-            "funding_cost": funding_cost,
             "reason": reason
         })
         del self.holdings[symbol]
         self.save_state()
         return total_pnl
 
-    def update_positions(self, current_prices):
-        closed = []
-        for symbol, pos in list(self.holdings.items()):
-            price = current_prices.get(symbol)
-            if price is None:
-                continue
-            if pos["side"] == "LONG":
-                if price >= pos["take_profit"]:
-                    pnl = self._close_position(symbol, price, "take_profit")
-                    closed.append({"symbol": symbol, "reason": "take_profit", "pnl": pnl})
-                elif price <= pos["stop_loss"]:
-                    pnl = self._close_position(symbol, price, "stop_loss")
-                    closed.append({"symbol": symbol, "reason": "stop_loss", "pnl": pnl})
-            else:
-                if price <= pos["take_profit"]:
-                    pnl = self._close_position(symbol, price, "take_profit")
-                    closed.append({"symbol": symbol, "reason": "take_profit", "pnl": pnl})
-                elif price >= pos["stop_loss"]:
-                    pnl = self._close_position(symbol, price, "stop_loss")
-                    closed.append({"symbol": symbol, "reason": "stop_loss", "pnl": pnl})
-        return closed
-
     def force_close_position(self, symbol, current_price):
         if symbol not in self.holdings:
             return False, 0, "无此持仓"
         pnl = self._close_position(symbol, current_price, "manual_close")
+        self.save_state()
         return True, pnl, f"强制平仓成功，盈亏 {pnl:+.2f} U"
 
     def force_close_all_positions(self, current_prices):
