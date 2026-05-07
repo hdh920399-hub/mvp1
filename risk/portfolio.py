@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime
 import numpy as np
-from data.binance import get_current_funding_rate
+from data.binance import get_funding_rate
 
 STATE_FILE = "trader_state.json"
 
@@ -124,19 +124,18 @@ class SimulatedTrader:
 
     def _calc_funding_cost(self, pos, exit_time):
         try:
-            fr_info = get_current_funding_rate(pos["symbol"])
-            if fr_info is None:
+            fr = get_funding_rate(pos["symbol"])
+            if fr is None:
                 return 0
-            funding_rate = fr_info
             start = pos.get("last_funding_check", pos["open_time"])
             hours = (exit_time - start).total_seconds() / 3600
             if hours <= 0:
                 return 0
             notional = pos["notional"]
             if pos["side"] == "LONG":
-                cost = notional * funding_rate * hours
+                cost = notional * fr * hours
             else:
-                cost = -notional * funding_rate * hours
+                cost = -notional * fr * hours
             return cost
         except:
             return 0
@@ -178,40 +177,20 @@ class SimulatedTrader:
             price = current_prices.get(symbol)
             if price is None:
                 continue
-            # 跟踪止损逻辑（简化版，实际可单独实现）
-            should_close = False
-            reason = ""
             if pos["side"] == "LONG":
-                # 更新最高价
-                if price > pos.get("high_since_entry", pos["avg_price"]):
-                    pos["high_since_entry"] = price
-                # 从高点回撤3%止损（可以配置）
-                trailing_stop = pos["high_since_entry"] * 0.97
-                if price <= trailing_stop:
-                    should_close = True
-                    reason = "trailing_stop"
+                if price >= pos["take_profit"]:
+                    pnl = self._close_position(symbol, price, "take_profit")
+                    closed.append({"symbol": symbol, "reason": "take_profit", "pnl": pnl})
                 elif price <= pos["stop_loss"]:
-                    should_close = True
-                    reason = "stop_loss"
-                elif price >= pos["take_profit"]:
-                    should_close = True
-                    reason = "take_profit"
+                    pnl = self._close_position(symbol, price, "stop_loss")
+                    closed.append({"symbol": symbol, "reason": "stop_loss", "pnl": pnl})
             else:
-                if price < pos.get("low_since_entry", pos["avg_price"]):
-                    pos["low_since_entry"] = price
-                trailing_stop = pos["low_since_entry"] * 1.03
-                if price >= trailing_stop:
-                    should_close = True
-                    reason = "trailing_stop"
+                if price <= pos["take_profit"]:
+                    pnl = self._close_position(symbol, price, "take_profit")
+                    closed.append({"symbol": symbol, "reason": "take_profit", "pnl": pnl})
                 elif price >= pos["stop_loss"]:
-                    should_close = True
-                    reason = "stop_loss"
-                elif price <= pos["take_profit"]:
-                    should_close = True
-                    reason = "take_profit"
-            if should_close:
-                pnl = self._close_position(symbol, price, reason)
-                closed.append({"symbol": symbol, "reason": reason, "pnl": pnl})
+                    pnl = self._close_position(symbol, price, "stop_loss")
+                    closed.append({"symbol": symbol, "reason": "stop_loss", "pnl": pnl})
         return closed
 
     def force_close_position(self, symbol, current_price):
@@ -260,10 +239,3 @@ class SimulatedTrader:
             "胜率": round(win_rate, 1),
             "持仓数量": len(self.holdings)
         }
-
-    def calculate_dynamic_notional(self, risk_pct, stop_loss_pct):
-        """根据风险百分比和止损幅度计算建议开仓名义价值"""
-        total_asset = self.get_total_asset()
-        max_loss = total_asset * risk_pct
-        notional = max_loss / stop_loss_pct
-        return max(10.0, min(notional, total_asset * 2))
