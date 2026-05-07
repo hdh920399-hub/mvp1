@@ -6,7 +6,7 @@ from data.binance import get_klines
 FUTURES_BASE_URL = "https://fapi.binance.com"
 
 def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
-    """扫描低价币种，使用多因子评分引擎，并生成具体交易策略"""
+    """扫描低价币种，同时计算做多分和做空分"""
     # 获取24h行情数据
     try:
         resp = requests.get(f"{FUTURES_BASE_URL}/fapi/v1/ticker/24hr", 
@@ -51,46 +51,29 @@ def scan_cheap_coins_with_signal(max_price=1.0, limit=20, offset=0):
             volume_series = df["volume"]
 
             scorer = MultiFactorScorer(df, price_now, symbol, volume_series, coin["change"])
-            score_result = scorer.calculate_total_score()
-
-            # ---- 生成具体交易策略 ----
-            _, atr = scorer.calculate_adx()
-            if score_result["direction"] == "LONG":
-                direction = "做多"
-                entry = price_now
-                stop_loss = entry - 2 * atr
-                take_profit = entry + 3 * atr
-                risk_pct_calc = (entry - stop_loss) / entry * 100
-                position_pct = min(0.2, 0.02 / (risk_pct_calc / 100)) if risk_pct_calc > 0 else 0.1
-                trade_advice = f"【交易策略】{direction} 入场 {entry:.6f}，止损 {stop_loss:.6f}，止盈 {take_profit:.6f}，建议仓位 {position_pct*100:.1f}%，杠杆 {score_result['leverage']}x。"
-            elif score_result["direction"] == "SHORT":
-                direction = "做空"
-                entry = price_now
-                stop_loss = entry + 2 * atr
-                take_profit = entry - 3 * atr
-                risk_pct_calc = (stop_loss - entry) / entry * 100
-                position_pct = min(0.2, 0.02 / (risk_pct_calc / 100)) if risk_pct_calc > 0 else 0.1
-                trade_advice = f"【交易策略】{direction} 入场 {entry:.6f}，止损 {stop_loss:.6f}，止盈 {take_profit:.6f}，建议仓位 {position_pct*100:.1f}%，杠杆 {score_result['leverage']}x。"
-            else:
-                trade_advice = "【交易策略】信号中性，建议观望。"
-
-            # 合并因子分析和交易策略
-            full_analysis = score_result["analysis"] + " " + trade_advice
+            # 计算做多分和做空分（返回两个分数）
+            long_score, short_score, long_analysis, short_analysis = scorer.calculate_scores()
 
             results.append({
                 "币种": symbol.replace("USDT", ""),
                 "价格": round(price_now, 6),
                 "24h涨跌": f"{coin['change']:+.2f}%",
                 "24h量(百万U)": f"{coin['volume']/1e6:.1f}",
-                "RSI": score_result.get("rsi", 50),
-                "AI信号": score_result["signal_text"],
-                "评分": score_result["total_score"],
-                "建议杠杆": score_result["leverage"],
-                "AI分析": full_analysis
+                "做多分": long_score,
+                "做空分": short_score,
+                "做多信号": "🟢 做多" if long_score >= 60 else "⚪ 弱",
+                "做空信号": "🔴 做空" if short_score >= 60 else "⚪ 弱",
+                "RSI": scorer.calculate_rsi()[0],
+                "AI分析(多)": long_analysis,
+                "AI分析(空)": short_analysis
             })
         except Exception as e:
             print(f"处理 {symbol} 出错: {e}")
             continue
 
-    results.sort(key=lambda x: x["评分"], reverse=True)
-    return pd.DataFrame(results), len(cheap)
+    # 分别按做多分和做空分排序
+    long_df = pd.DataFrame(results).sort_values("做多分", ascending=False)
+    short_df = pd.DataFrame(results).sort_values("做空分", ascending=False)
+    
+    # 为了兼容旧代码，返回两个DataFrame
+    return long_df, short_df, len(cheap)
