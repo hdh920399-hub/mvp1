@@ -86,7 +86,7 @@ if "custom_symbol" not in st.session_state:
 # 配置项默认值（刷新后保存）
 st.session_state.setdefault("auto_interval", 60)
 st.session_state.setdefault("max_positions", 5)
-st.session_state.setdefault("risk_pct", 10)
+st.session_state.setdefault("risk_pct", 5)
 st.session_state.setdefault("long_min_score", 60)     # 做多最低评分
 st.session_state.setdefault("short_min_score", 60)    # 做空最低评分（使用评分表示做空强度）
 st.session_state.setdefault("capital", 100)
