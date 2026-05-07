@@ -546,8 +546,8 @@ with st.expander("🧬 深度优化引擎 (点击展开)", expanded=False):
         if st.session_state.optimizer_result:
             st.json(st.session_state.optimizer_result.get("best_params", {}))
     with tab4:
-    st.markdown(st.session_state.adaptive_learner.get_learning_summary())
-    if st.button("触发自适应调整", key="adapt_btn"):
+        st.markdown(st.session_state.adaptive_learner.get_learning_summary())
+        if st.button("触发自适应调整", key="adapt_btn"):
         current_params = {
             "long_min_score": long_min_score,
             "short_min_score": short_min_score,
